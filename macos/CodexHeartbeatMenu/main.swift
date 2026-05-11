@@ -533,6 +533,17 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
     private let errorLabel = NSTextField(labelWithString: "")
     private let tableView = NSTableView()
     private let intervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let defaultIntervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let heartbeatMessageTextView = NSTextView()
+    private let heartbeatThreadField = NSTextField()
+    private let keepHeartbeatCheckbox = NSButton(checkboxWithTitle: "Keep heartbeat running after Codex closes", target: nil, action: nil)
+    private let advancedDisclosure = NSButton(checkboxWithTitle: "Show advanced settings", target: nil, action: nil)
+    private let serverNameField = NSTextField()
+    private let serverUrlField = NSTextField()
+    private let codexArgsField = NSTextField()
+    private let settingsStatusLabel = NSTextField(labelWithString: "")
+    private var advancedSettingViews: [NSView] = []
+    private let intervalChoices = [300, 900, 1800, 3600]
 
     init(runner: CommandRunner, preferencesStore: PreferencesStore, onStartCodex: @escaping () -> Void, onChanged: @escaping () -> Void) {
         self.runner = runner
@@ -541,14 +552,14 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         self.onChanged = onChanged
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 860, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 1040, height: 640),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Codex Heartbeat"
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 760, height: 420)
+        window.minSize = NSSize(width: 920, height: 560)
         window.center()
 
         super.init(window: window)
@@ -579,56 +590,125 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
 
     private func buildContent() {
         guard let window else { return }
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 860, height: 480))
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 1040, height: 640))
         content.autoresizingMask = [.width, .height]
         window.contentView = content
 
-        serverLabel.frame = NSRect(x: 20, y: 438, width: 220, height: 18)
+        let title = NSTextField(labelWithString: "Codex Heartbeat")
+        title.frame = NSRect(x: 24, y: 596, width: 240, height: 24)
+        title.font = NSFont.boldSystemFont(ofSize: 18)
+        content.addSubview(title)
+
+        let subtitle = NSTextField(labelWithString: "Launch Codex with heartbeat, monitor sessions, and adjust the settings most users need.")
+        subtitle.frame = NSRect(x: 24, y: 572, width: 620, height: 18)
+        subtitle.textColor = .secondaryLabelColor
+        content.addSubview(subtitle)
+
+        serverLabel.frame = NSRect(x: 24, y: 536, width: 220, height: 18)
         serverLabel.font = NSFont.boldSystemFont(ofSize: 13)
         content.addSubview(serverLabel)
 
-        urlLabel.frame = NSRect(x: 20, y: 414, width: 380, height: 18)
+        urlLabel.frame = NSRect(x: 24, y: 514, width: 520, height: 18)
+        urlLabel.textColor = .secondaryLabelColor
         content.addSubview(urlLabel)
 
-        addButton(to: content, title: "Start Codex", action: #selector(startCodex), frame: NSRect(x: 620, y: 426, width: 100, height: 30))
-        addButton(to: content, title: "Start Server", action: #selector(startServer), frame: NSRect(x: 730, y: 426, width: 100, height: 30))
-        addButton(to: content, title: "Stop Server", action: #selector(stopServer), frame: NSRect(x: 730, y: 392, width: 100, height: 30))
+        addButton(to: content, title: "Start Codex", action: #selector(startCodex), frame: NSRect(x: 24, y: 468, width: 116, height: 32))
+        addButton(to: content, title: "Start Server", action: #selector(startServer), frame: NSRect(x: 152, y: 468, width: 112, height: 32))
+        addButton(to: content, title: "Stop Server", action: #selector(stopServer), frame: NSRect(x: 276, y: 468, width: 112, height: 32))
+        addButton(to: content, title: "Refresh", action: #selector(refresh), frame: NSRect(x: 400, y: 468, width: 86, height: 32))
 
-        let scroll = NSScrollView(frame: NSRect(x: 20, y: 96, width: 820, height: 286))
-        scroll.autoresizingMask = [.width, .height]
+        let sessionsTitle = NSTextField(labelWithString: "Sessions")
+        sessionsTitle.frame = NSRect(x: 24, y: 432, width: 180, height: 20)
+        sessionsTitle.font = NSFont.boldSystemFont(ofSize: 14)
+        content.addSubview(sessionsTitle)
+
+        let scroll = NSScrollView(frame: NSRect(x: 24, y: 118, width: 620, height: 308))
+        scroll.autoresizingMask = [.height]
         scroll.hasVerticalScroller = true
         scroll.documentView = tableView
         content.addSubview(scroll)
 
-        addColumn("name", title: "Session", width: 180)
-        addColumn("status", title: "Status", width: 90)
-        addColumn("cwd", title: "CWD", width: 260)
-        addColumn("interval", title: "Interval", width: 80)
-        addColumn("target", title: "Target", width: 110)
-        addColumn("last", title: "Last Heartbeat", width: 140)
+        addColumn("name", title: "Session", width: 170)
+        addColumn("status", title: "Status", width: 80)
+        addColumn("cwd", title: "Project", width: 190)
+        addColumn("interval", title: "Interval", width: 70)
+        addColumn("last", title: "Last Heartbeat", width: 110)
         tableView.delegate = self
         tableView.dataSource = self
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = false
         tableView.headerView = NSTableHeaderView()
 
-        addButton(to: content, title: "Start", action: #selector(startSession), frame: NSRect(x: 20, y: 54, width: 72, height: 30))
-        addButton(to: content, title: "Stop", action: #selector(stopSession), frame: NSRect(x: 100, y: 54, width: 72, height: 30))
-        addButton(to: content, title: "Restart", action: #selector(restartSession), frame: NSRect(x: 180, y: 54, width: 82, height: 30))
-        addButton(to: content, title: "Remove", action: #selector(removeSession), frame: NSRect(x: 270, y: 54, width: 82, height: 30))
-        addButton(to: content, title: "Open Log", action: #selector(openLog), frame: NSRect(x: 360, y: 54, width: 86, height: 30))
+        addButton(to: content, title: "Start", action: #selector(startSession), frame: NSRect(x: 24, y: 74, width: 72, height: 30))
+        addButton(to: content, title: "Stop", action: #selector(stopSession), frame: NSRect(x: 104, y: 74, width: 72, height: 30))
+        addButton(to: content, title: "Restart", action: #selector(restartSession), frame: NSRect(x: 184, y: 74, width: 82, height: 30))
+        addButton(to: content, title: "Remove", action: #selector(removeSession), frame: NSRect(x: 274, y: 74, width: 82, height: 30))
+        addButton(to: content, title: "Open Log", action: #selector(openLog), frame: NSRect(x: 364, y: 74, width: 86, height: 30))
 
-        intervalPopup.frame = NSRect(x: 468, y: 56, width: 120, height: 26)
+        intervalPopup.frame = NSRect(x: 472, y: 76, width: 120, height: 26)
         intervalPopup.addItems(withTitles: ["5m", "15m", "30m", "1h"])
         intervalPopup.target = self
         intervalPopup.action = #selector(setInterval)
         content.addSubview(intervalPopup)
 
-        addButton(to: content, title: "Refresh", action: #selector(refresh), frame: NSRect(x: 758, y: 54, width: 82, height: 30))
+        buildSettingsPanel(content)
 
-        errorLabel.frame = NSRect(x: 20, y: 22, width: 820, height: 18)
+        errorLabel.frame = NSRect(x: 24, y: 24, width: 990, height: 18)
         errorLabel.textColor = .systemRed
         content.addSubview(errorLabel)
+        loadSettings()
+    }
+
+    private func buildSettingsPanel(_ content: NSView) {
+        let x: CGFloat = 680
+        let title = NSTextField(labelWithString: "Settings")
+        title.frame = NSRect(x: x, y: 536, width: 260, height: 22)
+        title.font = NSFont.boldSystemFont(ofSize: 15)
+        content.addSubview(title)
+
+        let note = NSTextField(wrappingLabelWithString: "These defaults are used when starting new Codex sessions from the menu. Running sessions can use their own interval.")
+        note.frame = NSRect(x: x, y: 492, width: 320, height: 38)
+        note.textColor = .secondaryLabelColor
+        content.addSubview(note)
+
+        addSettingsLabel("Default interval", to: content, x: x, y: 454)
+        defaultIntervalPopup.frame = NSRect(x: x, y: 426, width: 160, height: 26)
+        defaultIntervalPopup.addItems(withTitles: ["5m", "15m", "30m", "1h"])
+        content.addSubview(defaultIntervalPopup)
+
+        addSettingsLabel("Heartbeat message", to: content, x: x, y: 386)
+        heartbeatMessageTextView.font = NSFont.systemFont(ofSize: 13)
+        heartbeatMessageTextView.isRichText = false
+        heartbeatMessageTextView.allowsUndo = true
+        heartbeatMessageTextView.textContainerInset = NSSize(width: 6, height: 6)
+        let messageScroll = NSScrollView(frame: NSRect(x: x, y: 250, width: 320, height: 130))
+        messageScroll.borderType = .bezelBorder
+        messageScroll.hasVerticalScroller = true
+        messageScroll.documentView = heartbeatMessageTextView
+        content.addSubview(messageScroll)
+
+        keepHeartbeatCheckbox.frame = NSRect(x: x, y: 216, width: 320, height: 22)
+        content.addSubview(keepHeartbeatCheckbox)
+
+        advancedDisclosure.frame = NSRect(x: x, y: 180, width: 220, height: 22)
+        advancedDisclosure.target = self
+        advancedDisclosure.action = #selector(toggleAdvancedSettings)
+        content.addSubview(advancedDisclosure)
+
+        addAdvancedRow("Preferred thread", field: heartbeatThreadField, to: content, x: x, y: 140)
+        addAdvancedRow("Server name", field: serverNameField, to: content, x: x, y: 104)
+        addAdvancedRow("Server URL", field: serverUrlField, to: content, x: x, y: 68)
+        addAdvancedRow("Codex args", field: codexArgsField, to: content, x: x, y: 32)
+
+        let save = NSButton(title: "Save Settings", target: self, action: #selector(saveSettings))
+        save.frame = NSRect(x: 888, y: 178, width: 112, height: 30)
+        content.addSubview(save)
+
+        settingsStatusLabel.frame = NSRect(x: x, y: 8, width: 320, height: 18)
+        settingsStatusLabel.textColor = .secondaryLabelColor
+        content.addSubview(settingsStatusLabel)
+
+        setAdvancedSettingsVisible(false)
     }
 
     private func addColumn(_ id: String, title: String, width: CGFloat) {
@@ -642,6 +722,96 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         let button = NSButton(title: title, target: self, action: action)
         button.frame = frame
         content.addSubview(button)
+    }
+
+    private func addSettingsLabel(_ title: String, to content: NSView, x: CGFloat, y: CGFloat) {
+        let label = NSTextField(labelWithString: title)
+        label.frame = NSRect(x: x, y: y, width: 220, height: 18)
+        label.font = NSFont.boldSystemFont(ofSize: 12)
+        content.addSubview(label)
+    }
+
+    private func addAdvancedRow(_ title: String, field: NSTextField, to content: NSView, x: CGFloat, y: CGFloat) {
+        let label = NSTextField(labelWithString: title)
+        label.frame = NSRect(x: x, y: y + 22, width: 140, height: 16)
+        label.textColor = .secondaryLabelColor
+        label.font = NSFont.systemFont(ofSize: 11)
+        content.addSubview(label)
+
+        field.frame = NSRect(x: x, y: y, width: 320, height: 22)
+        content.addSubview(field)
+        advancedSettingViews.append(label)
+        advancedSettingViews.append(field)
+    }
+
+    private func setAdvancedSettingsVisible(_ visible: Bool) {
+        for view in advancedSettingViews {
+            view.isHidden = !visible
+        }
+    }
+
+    private func loadSettings() {
+        let prefs = preferencesStore.preferences
+        if let index = intervalChoices.firstIndex(of: prefs.heartbeatIntervalSeconds) {
+            defaultIntervalPopup.selectItem(at: index)
+        } else {
+            defaultIntervalPopup.selectItem(withTitle: "30m")
+        }
+        heartbeatMessageTextView.string = prefs.heartbeatMessage
+        heartbeatThreadField.stringValue = prefs.heartbeatThread
+        keepHeartbeatCheckbox.state = prefs.keepHeartbeat ? .on : .off
+        serverNameField.stringValue = prefs.serverName
+        serverUrlField.stringValue = prefs.serverUrl
+        codexArgsField.stringValue = prefs.codexArgs
+        settingsStatusLabel.stringValue = ""
+    }
+
+    @objc private func toggleAdvancedSettings() {
+        setAdvancedSettingsVisible(advancedDisclosure.state == .on)
+    }
+
+    @objc private func saveSettings() {
+        let intervalIndex = defaultIntervalPopup.indexOfSelectedItem
+        let interval = intervalIndex >= 0 && intervalIndex < intervalChoices.count ? intervalChoices[intervalIndex] : 1800
+        let heartbeatMessage = heartbeatMessageTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let heartbeatThread = heartbeatThreadField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let serverName = serverNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let serverUrl = serverUrlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let codexArgs = codexArgsField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !heartbeatMessage.isEmpty else {
+            settingsStatusLabel.stringValue = "Heartbeat message is required."
+            settingsStatusLabel.textColor = .systemRed
+            return
+        }
+        guard !serverName.isEmpty, serverName.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil else {
+            settingsStatusLabel.stringValue = "Advanced server name is invalid."
+            settingsStatusLabel.textColor = .systemRed
+            return
+        }
+        guard !serverUrl.isEmpty else {
+            settingsStatusLabel.stringValue = "Advanced server URL is required."
+            settingsStatusLabel.textColor = .systemRed
+            return
+        }
+
+        do {
+            try preferencesStore.update {
+                $0.heartbeatIntervalSeconds = interval
+                $0.heartbeatMessage = heartbeatMessage
+                $0.heartbeatThread = heartbeatThread
+                $0.keepHeartbeat = keepHeartbeatCheckbox.state == .on
+                $0.serverName = serverName
+                $0.serverUrl = serverUrl
+                $0.codexArgs = codexArgs
+            }
+            settingsStatusLabel.stringValue = "Settings saved."
+            settingsStatusLabel.textColor = .secondaryLabelColor
+            onChanged()
+        } catch {
+            settingsStatusLabel.stringValue = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            settingsStatusLabel.textColor = .systemRed
+        }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -880,8 +1050,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         menu.addItem(NSMenuItem.separator())
-        addAction(menu, "Dashboard...", #selector(openDashboardWindow))
-        addAction(menu, "Settings...", #selector(openSettingsWindow))
+        addAction(menu, "Open Control Panel...", #selector(openDashboardWindow))
         addAction(menu, "Open Preferences File", #selector(openPreferencesFile))
         addAction(
             menu,
