@@ -198,7 +198,39 @@ test('session remove deletes saved session state through the documented command'
   });
 });
 
-test('codex wrapper does not stop an existing heartbeat it did not start', () => {
+test('stop-current stops a heartbeat session matching CODEX_THREAD_ID', async () => {
+  await withHomeAsync(async (home) => {
+    const heartbeat = spawnKeeper();
+    try {
+      writeJson(path.join(home, 'sessions', 'current-session', 'session.json'), {
+        name: 'current-session',
+        url: 'ws://127.0.0.1:19010',
+        cwd: repoRoot,
+        threadId: 'thread-current',
+        intervalSeconds: 60,
+        status: 'active',
+        pid: heartbeat.pid,
+        commandFragment: '',
+      });
+
+      const output = runText(
+        ['stop-current', '--reason', 'Blocked: need user input'],
+        home,
+        { CODEX_THREAD_ID: 'thread-current' },
+      );
+
+      assert.match(output, /Stopped heartbeat session current-session/);
+      await waitForProcessExit(heartbeat);
+      const status = runJson(['session', 'status', '--name', 'current-session', '--json'], home);
+      assert.equal(status.status, 'stopped');
+    } finally {
+      heartbeat.kill('SIGKILL');
+      await waitForProcessExit(heartbeat);
+    }
+  });
+});
+
+test('codex wrapper refuses to launch when its heartbeat session is already running', () => {
   withHome((home) => {
     const keeper = spawnKeeper();
     try {
@@ -223,16 +255,22 @@ test('codex wrapper does not stop an existing heartbeat it did not start', () =>
       const binDir = path.join(home, 'bin');
       fs.mkdirSync(binDir, { recursive: true });
       const fakeCodex = path.join(binDir, 'codex');
-      fs.writeFileSync(fakeCodex, '#!/bin/sh\nexit 0\n');
+      const launchMarker = path.join(home, 'codex-launched');
+      fs.writeFileSync(fakeCodex, `#!/bin/sh\ntouch "${launchMarker}"\nexit 0\n`);
       fs.chmodSync(fakeCodex, 0o755);
 
-      runText(
-        ['codex', '--heartbeat-name', 'existing', '--url', 'ws://127.0.0.1:19011', '--yolo'],
-        home,
-        { PATH: `${binDir}:${process.env.PATH}` },
+      assert.throws(
+        () =>
+          runText(
+            ['codex', '--heartbeat-name', 'existing', '--url', 'ws://127.0.0.1:19011', '--yolo'],
+            home,
+            { PATH: `${binDir}:${process.env.PATH}` },
+          ),
+        /Refusing to launch Codex/,
       );
 
       assert.equal(isPidRunning(keeper.pid), true);
+      assert.equal(fs.existsSync(launchMarker), false);
     } finally {
       keeper.kill('SIGKILL');
     }

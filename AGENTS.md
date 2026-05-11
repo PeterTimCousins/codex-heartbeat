@@ -26,6 +26,8 @@ Heartbeat sessions are named and isolated. Do not add global single-session file
 
 Only send heartbeats to loaded, idle app-server threads. Use `thread/loaded/list`, `thread/read`, `thread/status/changed`, and `thread/closed` to decide whether a target is safe. Never use `codex exec resume` for live-session heartbeats.
 
+If a heartbeat asks an agent to continue but it cannot proceed without user input, the agent should run `codex-heartbeat stop-current --reason "Blocked: <short reason>"`. This resolves the current heartbeat by `CODEX_THREAD_ID` or the wrapper-provided heartbeat session name and avoids repeated heartbeat prompts.
+
 Avoid killing app-server processes the manager did not start. Process cleanup should rely on recorded manager-owned state.
 
 Use dependency-free Node ESM unless a dependency removes real complexity.

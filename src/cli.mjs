@@ -7,12 +7,22 @@ import { slugifyName } from './fs-util.mjs';
 import { DEFAULT_INTERVAL_SECONDS, DEFAULT_URL, stateRoot } from './paths.mjs';
 import { ensurePreferences, preferencesPath, readPreferences, writePreferences } from './preferences.mjs';
 import { serverStatus, startServer, stopServer } from './server-manager.mjs';
-import { listSessions, reapManagedState, removeSession, sessionStatus, startSession, stopSession, triggerSession } from './session-manager.mjs';
+import {
+  listSessions,
+  reapManagedState,
+  removeSession,
+  sessionStatus,
+  startSession,
+  stopCurrentSession,
+  stopSession,
+  triggerSession,
+} from './session-manager.mjs';
 import { resolveThreadReferenceFromAppServer } from './thread-resolver.mjs';
 
 function usage() {
   return `Usage:
   codex-heartbeat status [--json]
+  codex-heartbeat stop-current [--reason TEXT] [--name NAME] [--json]
   codex-heartbeat server start [--name default] [--url ws://127.0.0.1:18654] [--foreground]
   codex-heartbeat server stop [--name default]
   codex-heartbeat server status [--name default] [--json]
@@ -411,6 +421,12 @@ async function runCodex(argv) {
         ? `Started heartbeat session ${result.state.name} with pid ${result.state.pid}`
         : result.message,
     );
+    if (!result.started) {
+      removeSignalHandlers();
+      throw new Error(
+        `${result.message}. Refusing to launch Codex because this wrapper did not create the heartbeat session. Stop or restart that heartbeat first, or use --heartbeat-name for a separate session.`,
+      );
+    }
   }
 
   const codexArgs = hasCodexCwdArg(options.codexArgs)
@@ -418,8 +434,15 @@ async function runCodex(argv) {
     : ['-C', heartbeatCwd, ...options.codexArgs];
 
   try {
+    const childEnv = {
+      ...process.env,
+      CODEX_HEARTBEAT_HOME: stateRoot(),
+      CODEX_HEARTBEAT_SESSION_NAME: heartbeatName,
+      CODEX_HEARTBEAT_STOP_COMMAND: 'codex-heartbeat stop-current --reason "Blocked: need user input"',
+    };
     child = spawn('codex', ['--remote', url, ...codexArgs], {
       cwd: options.heartbeatCwd,
+      env: childEnv,
       stdio: 'inherit',
     });
     const result = await new Promise((resolve, reject) => {
@@ -669,6 +692,20 @@ function runPreferences(command, argv) {
   throw new Error(`Unknown preferences command: ${action}`);
 }
 
+function runStopCurrent(argv) {
+  const options = parseOptions(argv);
+  const result = stopCurrentSession({
+    threadId: process.env.CODEX_THREAD_ID,
+    sessionName: options.name ?? process.env.CODEX_HEARTBEAT_SESSION_NAME,
+    reason: options.reason ?? 'current-session',
+  });
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(result.stopped ? `Stopped heartbeat session ${result.name}` : result.message);
+}
+
 function runScript(scriptName, args = []) {
   const scriptPath = path.join(repoRoot(), 'scripts', scriptName);
   const result = spawnSync(scriptPath, args, {
@@ -760,6 +797,10 @@ export async function runCli(argv) {
         printSession(session);
       }
     }
+    return;
+  }
+  if (command === 'stop-current') {
+    runStopCurrent([subcommand, ...rest].filter(Boolean));
     return;
   }
   if (command === 'server') {

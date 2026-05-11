@@ -49,6 +49,8 @@ node bin/codex-heartbeat.mjs codex --yolo
 
 This starts or reuses the managed app-server, starts a heartbeat session for the current directory, then runs `codex --remote <managed-url> --yolo`. The heartbeat stops when the wrapped Codex process exits.
 
+If the auto-named heartbeat session for that directory is already running, the wrapper refuses to launch Codex. This avoids opening a second same-cwd Codex session that could cause the existing unpinned heartbeat to follow the wrong thread. Stop or restart the existing heartbeat first, or pass a distinct `--heartbeat-name` and pin it with `--heartbeat-thread` when you deliberately need a separate session.
+
 The same flow is available from the menu bar app as **Start Codex with Heartbeat...**. The app asks for a project folder, opens the configured terminal app in that folder, and runs the wrapped Codex command using the saved preferences.
 
 Useful wrapper options:
@@ -128,6 +130,14 @@ Trigger a running session to send one heartbeat as soon as the target thread is 
 node bin/codex-heartbeat.mjs session trigger --name dropship-main
 ```
 
+Stop the heartbeat for the current Codex thread from inside the running agent:
+
+```bash
+codex-heartbeat stop-current --reason "Blocked: need user input"
+```
+
+`stop-current` first matches the running heartbeat session by `CODEX_THREAD_ID`, then falls back to `CODEX_HEARTBEAT_SESSION_NAME` for sessions launched through `codex-heartbeat codex`.
+
 Inspect or update defaults used by the menu app:
 
 ```bash
@@ -175,6 +185,7 @@ The heartbeat worker treats `loaded + idle` as the only safe send condition:
 - Only one running unpinned session can follow a given cwd on a given app-server URL. Start a second session with `--thread` if you deliberately need exact thread pinning.
 - If no matching thread is loaded, an unpinned session waits for one to appear.
 - If a pinned target becomes unloaded or emits `thread/closed`, the worker exits and marks the session stale or closed.
+- If a heartbeat asks an agent to continue but the agent is blocked waiting for user input, the agent can run `codex-heartbeat stop-current --reason "Blocked: <short reason>"` to stop its heartbeat without needing to know the heartbeat session name.
 
 This deliberately avoids `codex exec resume` for live-session heartbeats because that can create overlapping turns instead of behaving like a queued user message in the same app-server session.
 

@@ -5,7 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { extractResumeThreadId, parseResumeLogRows } from '../src/codex-log-watch.mjs';
-import { findUnpinnedCwdConflict, reapManagedState, removeSession, sessionStatus, startSession, stopSession, triggerSession } from '../src/session-manager.mjs';
+import {
+  findUnpinnedCwdConflict,
+  reapManagedState,
+  removeSession,
+  sessionStatus,
+  startSession,
+  stopCurrentSession,
+  stopSession,
+  triggerSession,
+} from '../src/session-manager.mjs';
 import {
   compareThreadRecency,
   findLoadedThreadForCwd,
@@ -265,6 +274,39 @@ test('triggerSession marks a running session for immediate heartbeat', () => {
     assert.equal(status.triggerPending, true);
     assert.equal(status.statusDetail, 'Manual heartbeat requested');
   } finally {
+    cleanupHome(home);
+  }
+});
+
+test('stopCurrentSession stops the running heartbeat for CODEX_THREAD_ID', async () => {
+  const home = makeHome();
+  const heartbeat = spawnLongRunningProcess();
+  try {
+    writeSessionState('current-session', {
+      name: 'current-session',
+      serverName: null,
+      url: 'ws://127.0.0.1:19018',
+      cwd: process.cwd(),
+      threadId: 'thread-current',
+      intervalSeconds: 60,
+      status: 'active',
+      pid: heartbeat.pid,
+      commandFragment: '',
+    });
+
+    const result = stopCurrentSession({
+      threadId: 'thread-current',
+      reason: 'Blocked: need user input',
+    });
+
+    assert.equal(result.stopped, true);
+    assert.equal(result.name, 'current-session');
+    assert.equal(result.matchedBy, 'thread');
+    await waitForExit(heartbeat);
+    assert.equal(sessionStatus('current-session').status, 'stopped');
+  } finally {
+    heartbeat.kill('SIGKILL');
+    await waitForExit(heartbeat);
     cleanupHome(home);
   }
 });

@@ -176,6 +176,44 @@ export function stopSession(name, reason = 'manual') {
   return { stopped, state };
 }
 
+export function stopCurrentSession({ threadId, sessionName, reason = 'current-session' } = {}) {
+  const runningSessions = listSessions().filter((session) => session.running);
+  if (threadId) {
+    const matches = runningSessions.filter((session) => session.threadId === threadId);
+    if (matches.length === 1) {
+      const result = stopSession(matches[0].name, reason);
+      return { ...result, name: matches[0].name, matchedBy: 'thread' };
+    }
+    if (matches.length > 1) {
+      if (sessionName) {
+        const namedMatch = matches.find((session) => session.name === sessionName);
+        if (namedMatch) {
+          const result = stopSession(namedMatch.name, reason);
+          return { ...result, name: namedMatch.name, matchedBy: 'thread-and-name' };
+        }
+      }
+      throw new Error(`Multiple running heartbeat sessions target thread ${threadId}; pass --name to choose one.`);
+    }
+  }
+
+  if (sessionName) {
+    const session = sessionStatus(sessionName);
+    if (!session) {
+      return { stopped: false, message: `Session ${sessionName} not found` };
+    }
+    if (!session.running) {
+      return { stopped: false, message: `Session ${session.name} is not running` };
+    }
+    const result = stopSession(session.name, reason);
+    return { ...result, name: session.name, matchedBy: 'name' };
+  }
+
+  if (threadId) {
+    return { stopped: false, message: `No running heartbeat session targets current Codex thread ${threadId}` };
+  }
+  return { stopped: false, message: 'No current Codex thread or heartbeat session is available. Set CODEX_THREAD_ID or CODEX_HEARTBEAT_SESSION_NAME.' };
+}
+
 export function triggerSession(name, reason = 'manual') {
   const safeName = slugifyName(name);
   const state = readSessionState(safeName);
