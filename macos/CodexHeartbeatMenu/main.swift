@@ -194,6 +194,10 @@ final class IntervalAction: NSObject {
     }
 }
 
+final class SessionIntervalPopup: NSPopUpButton {
+    var sessionName: String = ""
+}
+
 final class CommandRunner {
     let cliPath: String
 
@@ -532,7 +536,6 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
     private let urlLabel = NSTextField(labelWithString: "URL: unknown")
     private let errorLabel = NSTextField(labelWithString: "")
     private let tableView = NSTableView()
-    private let intervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let defaultIntervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let heartbeatMessageTextView = NSTextView()
     private let heartbeatThreadField = NSTextField()
@@ -647,13 +650,6 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         addButton(to: content, title: "Restart", action: #selector(restartSession), frame: NSRect(x: 184, y: 74, width: 82, height: 30))
         addButton(to: content, title: "Remove", action: #selector(removeSession), frame: NSRect(x: 274, y: 74, width: 82, height: 30))
         addButton(to: content, title: "Open Log", action: #selector(openLog), frame: NSRect(x: 364, y: 74, width: 86, height: 30))
-
-        intervalPopup.frame = NSRect(x: 472, y: 76, width: 120, height: 26)
-        intervalPopup.autoresizingMask = [.maxXMargin]
-        intervalPopup.addItems(withTitles: ["5m", "15m", "30m", "1h"])
-        intervalPopup.target = self
-        intervalPopup.action = #selector(setInterval)
-        content.addSubview(intervalPopup)
 
         buildSettingsPanel(content)
 
@@ -834,9 +830,30 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         sessions.count
     }
 
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        28
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard row < sessions.count, let id = tableColumn?.identifier.rawValue else { return nil }
         let session = sessions[row]
+        let width = tableColumn?.width ?? 80
+        if id == "interval" {
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 28))
+            let popup = SessionIntervalPopup(frame: NSRect(x: 0, y: 2, width: width, height: 24), pullsDown: false)
+            popup.bezelStyle = .texturedRounded
+            popup.isBordered = false
+            popup.addItems(withTitles: intervalChoices.map { formatInterval(Double($0)) })
+            if let index = intervalChoices.firstIndex(of: Int(session.intervalSeconds)) {
+                popup.selectItem(at: index)
+            }
+            popup.target = self
+            popup.action = #selector(setIntervalFromCell(_:))
+            popup.sessionName = session.name
+            container.addSubview(popup)
+            return container
+        }
+
         let value: String
         switch id {
         case "name":
@@ -855,12 +872,15 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
             value = ""
         }
 
-        let cell = tableView.makeView(withIdentifier: tableColumn!.identifier, owner: self) as? NSTextField
-            ?? NSTextField(labelWithString: "")
-        cell.identifier = tableColumn!.identifier
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 28))
+        container.identifier = tableColumn!.identifier
+        let cell = NSTextField(labelWithString: "")
+        cell.frame = NSRect(x: 0, y: 5, width: width, height: 18)
+        cell.font = NSFont.systemFont(ofSize: 13)
         cell.lineBreakMode = .byTruncatingMiddle
         cell.stringValue = value
-        return cell
+        container.addSubview(cell)
+        return container
     }
 
     private func selectedSession() -> SessionStatus? {
@@ -944,12 +964,14 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         NSWorkspace.shared.open(URL(fileURLWithPath: logFile))
     }
 
-    @objc private func setInterval() {
-        guard let session = selectedSession() else { return }
-        let secondsByIndex = [300, 900, 1800, 3600]
-        let index = intervalPopup.indexOfSelectedItem
-        guard index >= 0, index < secondsByIndex.count else { return }
-        restart(session, intervalSeconds: secondsByIndex[index])
+    @objc private func setIntervalFromCell(_ sender: NSPopUpButton) {
+        guard
+            let popup = sender as? SessionIntervalPopup,
+            let session = sessions.first(where: { $0.name == popup.sessionName })
+        else { return }
+        let index = sender.indexOfSelectedItem
+        guard index >= 0, index < intervalChoices.count else { return }
+        restart(session, intervalSeconds: intervalChoices[index])
     }
 }
 
