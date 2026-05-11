@@ -161,12 +161,40 @@ The heartbeat worker treats `loaded + idle` as the only safe send condition:
 - If the thread is `idle`, it sends with `turn/start`.
 - If the thread is `active`, it queues one heartbeat and sends after the thread becomes idle.
 - Sessions started without `--thread` follow the active loaded thread for the configured cwd. They retarget on app-server `thread/started` and `thread/status/changed` events, and they use app-server `thread/list` plus `thread/resume` as a conservative fallback when `/resume` updates recency without emitting a loaded-thread event.
+- For unpinned sessions, the worker also watches Codex's local `~/.codex/logs_2.sqlite` resume lifecycle log as a best-effort `/resume` detector. This is used only to notice an already-loaded resumed thread, and the candidate is still verified through the app-server as a loaded thread for the same cwd before retargeting. If the log database or `sqlite3` command is unavailable, normal heartbeat behavior continues without this detector.
 - Sessions started with `--thread` are pinned to that exact thread. The wrapper also accepts `--heartbeat-thread THREAD_ID_OR_NAME` and `--heartbeat-thread-name NAME`, which is the reliable path when launching directly into an existing thread with `codex resume`.
 - Only one running unpinned session can follow a given cwd on a given app-server URL. Start a second session with `--thread` if you deliberately need exact thread pinning.
 - If no matching thread is loaded, an unpinned session waits for one to appear.
 - If a pinned target becomes unloaded or emits `thread/closed`, the worker exits and marks the session stale or closed.
 
 This deliberately avoids `codex exec resume` for live-session heartbeats because that can create overlapping turns instead of behaving like a queued user message in the same app-server session.
+
+### `/resume` Detection
+
+`/new` is detected through the app-server `thread/started` event. `/resume` is different: current Codex builds do not expose a stable app-server event for "the foreground TUI changed from thread X to thread Y".
+
+For unpinned sessions, `codex-heartbeat` therefore uses a best-effort detector:
+
+- On worker start, it records the current high-watermark from `~/.codex/logs_2.sqlite`.
+- During the normal heartbeat poll loop, it looks only for newer Codex app-server lifecycle rows containing `composing running thread resume response`.
+- It extracts the resumed thread ID, then verifies through the app-server that the thread is loaded and belongs to the same cwd before retargeting.
+- If `~/.codex/logs_2.sqlite` or `sqlite3` is unavailable, the worker logs that detection is disabled and continues with normal heartbeat behavior.
+
+This relies on Codex private local log details, so it may need adjustment if Codex changes its logging. To verify it worked, open the session log shown by `codex-heartbeat status` and look for lines like:
+
+```text
+Codex /resume log detection enabled from log id ...
+detected Codex /resume log for thread <thread-id>
+retargeted from thread <old-id> to codex-resume-log thread <new-id> status=idle
+```
+
+The stable alternative is to launch directly into a known thread and pin the heartbeat:
+
+```bash
+codex-heartbeat codex \
+  --heartbeat-thread "e2e extended testing" \
+  -- --yolo resume "e2e extended testing"
+```
 
 ## Development
 

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { extractResumeThreadId, parseResumeLogRows } from '../src/codex-log-watch.mjs';
 import { findUnpinnedCwdConflict, reapManagedState, removeSession, sessionStatus, startSession } from '../src/session-manager.mjs';
 import {
   compareThreadRecency,
@@ -352,6 +353,18 @@ test('resumeThreadForCwd resumes without turns through the app-server', async ()
       },
     },
   ]);
+});
+
+test('parseResumeLogRows extracts Codex app-server resume thread ids', () => {
+  const output = [
+    '134434358\x1f019de3ee-14f6-7250-a52c-4dbed01b36ef\x1fcomposing running thread resume response thread_id=019de3ee-14f6-7250-a52c-4dbed01b36ef request_id=ConnectionRequestId { connection_id: ConnectionId(28), request_id: Integer(6) }',
+    '134434359\x1f\x1fcomposing running thread resume response thread_id=019e1629-418d-7ed2-bf57-1115a5892fda request_id=ConnectionRequestId { connection_id: ConnectionId(29), request_id: Integer(6) }',
+  ].join('\n');
+
+  const rows = parseResumeLogRows(output);
+  assert.equal(rows.length, 2);
+  assert.equal(extractResumeThreadId(rows[0]), '019de3ee-14f6-7250-a52c-4dbed01b36ef');
+  assert.equal(extractResumeThreadId(rows[1]), '019e1629-418d-7ed2-bf57-1115a5892fda');
 });
 
 test('resolveThreadReferenceFromThreads resolves ids and exact names', () => {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
 import { AppServerClient } from './app-server-client.mjs';
+import { extractResumeThreadId, readCodexLogHighWatermark, readCodexResumeLogRows } from './codex-log-watch.mjs';
 import { appendLine } from './fs-util.mjs';
 import { hasStopMarker, readSessionState, updateSessionState } from './state.mjs';
 
@@ -173,6 +174,8 @@ async function main() {
   const followCwdThread = shouldFollowCwdThread(state);
   let recentThreadListAfterUpdatedAt = Math.floor(Date.now() / 1000);
   const handledRecentThreadListIds = new Set();
+  let codexResumeLogLastSeenId = 0;
+  let codexResumeLogEnabled = false;
 
   function mark(updates) {
     updateSessionState(name, updates);
@@ -347,6 +350,40 @@ async function main() {
     return true;
   }
 
+  async function retargetFromCodexResumeLog() {
+    if (!followCwdThread || !codexResumeLogEnabled) {
+      return false;
+    }
+
+    let rows;
+    try {
+      rows = readCodexResumeLogRows({ afterId: codexResumeLogLastSeenId });
+    } catch (error) {
+      codexResumeLogEnabled = false;
+      appendLine(
+        logFile,
+        `Codex /resume log detection disabled: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+
+    let retargeted = false;
+    for (const row of rows) {
+      codexResumeLogLastSeenId = Math.max(codexResumeLogLastSeenId, row.id);
+      const threadId = extractResumeThreadId(row);
+      if (!threadId || threadId === targetThreadId) {
+        continue;
+      }
+      appendLine(logFile, `detected Codex /resume log for thread ${threadId}`);
+      const didRetarget = await retargetToMatchingThread(threadId, 'codex-resume-log');
+      if (!didRetarget) {
+        appendLine(logFile, `Codex /resume log thread ${threadId} is not a loaded match for cwd ${state.cwd}`);
+      }
+      retargeted = retargeted || didRetarget;
+    }
+    return retargeted;
+  }
+
   client.on('thread/status/changed', (params) => {
     if (params?.threadId !== targetThreadId) {
       retargetToMatchingThread(params?.threadId, 'status-event', params?.status?.type ?? null).catch((error) => {
@@ -425,6 +462,17 @@ async function main() {
   await client.initialize('codex-heartbeat-session');
   await refreshTarget();
 
+  if (followCwdThread) {
+    const resumeLog = readCodexLogHighWatermark();
+    if (resumeLog.ok) {
+      codexResumeLogEnabled = true;
+      codexResumeLogLastSeenId = resumeLog.lastSeenId;
+      appendLine(logFile, `Codex /resume log detection enabled from log id ${codexResumeLogLastSeenId}`);
+    } else {
+      appendLine(logFile, `Codex /resume log detection disabled: ${resumeLog.reason}`);
+    }
+  }
+
   if (state.immediate) {
     await sendHeartbeat(state.once ? 'once' : 'immediate');
   }
@@ -457,6 +505,9 @@ async function main() {
 
     await retargetFromRecentThreadList().catch((error) => {
       appendLine(logFile, `thread-list retarget failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    await retargetFromCodexResumeLog().catch((error) => {
+      appendLine(logFile, `Codex /resume log retarget failed: ${error instanceof Error ? error.message : String(error)}`);
     });
     await refreshTarget();
     if (targetStatus === 'idle' && queuedHeartbeat) {
