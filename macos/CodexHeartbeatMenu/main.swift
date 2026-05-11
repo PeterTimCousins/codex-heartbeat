@@ -83,6 +83,7 @@ struct MenuPreferences: Codable {
     var serverUrl: String = "ws://127.0.0.1:18654"
     var heartbeatIntervalSeconds: Int = 1800
     var heartbeatMessage: String = "Heartbeat check: Are we done? If complete, report completion. If blocked, ask exactly what input is needed. If not blocked and no user input is needed, continue the next safe, coherent step."
+    var heartbeatThread: String = ""
     var codexArgs: String = "--yolo"
     var keepHeartbeat: Bool = false
 
@@ -91,6 +92,7 @@ struct MenuPreferences: Codable {
         case serverUrl
         case heartbeatIntervalSeconds
         case heartbeatMessage
+        case heartbeatThread
         case codexArgs
         case keepHeartbeat
     }
@@ -103,6 +105,7 @@ struct MenuPreferences: Codable {
         serverUrl = try container.decodeIfPresent(String.self, forKey: .serverUrl) ?? serverUrl
         heartbeatIntervalSeconds = try container.decodeIfPresent(Int.self, forKey: .heartbeatIntervalSeconds) ?? heartbeatIntervalSeconds
         heartbeatMessage = try container.decodeIfPresent(String.self, forKey: .heartbeatMessage) ?? heartbeatMessage
+        heartbeatThread = try container.decodeIfPresent(String.self, forKey: .heartbeatThread) ?? heartbeatThread
         codexArgs = try container.decodeIfPresent(String.self, forKey: .codexArgs) ?? codexArgs
         keepHeartbeat = try container.decodeIfPresent(Bool.self, forKey: .keepHeartbeat) ?? keepHeartbeat
     }
@@ -362,6 +365,7 @@ final class SettingsWindowController: NSWindowController {
     private let serverUrlField = NSTextField()
     private let intervalField = NSTextField()
     private let heartbeatMessageTextView = NSTextView()
+    private let heartbeatThreadField = NSTextField()
     private let codexArgsField = NSTextField()
     private let keepHeartbeatCheckbox = NSButton(checkboxWithTitle: "Keep heartbeat running after Codex exits", target: nil, action: nil)
 
@@ -370,7 +374,7 @@ final class SettingsWindowController: NSWindowController {
         self.onSave = onSave
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 460),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -390,13 +394,14 @@ final class SettingsWindowController: NSWindowController {
 
     private func buildContent() {
         guard let window else { return }
-        window.setContentSize(NSSize(width: 620, height: 420))
-        let content = NSView(frame: window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 620, height: 420))
+        window.setContentSize(NSSize(width: 620, height: 460))
+        let content = NSView(frame: window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 620, height: 460))
         window.contentView = content
 
-        addRow(to: content, label: "Server name", field: serverNameField, y: 360)
-        addRow(to: content, label: "Server URL", field: serverUrlField, y: 320)
-        addRow(to: content, label: "Interval seconds", field: intervalField, y: 280)
+        addRow(to: content, label: "Server name", field: serverNameField, y: 400)
+        addRow(to: content, label: "Server URL", field: serverUrlField, y: 360)
+        addRow(to: content, label: "Interval seconds", field: intervalField, y: 320)
+        addRow(to: content, label: "Heartbeat thread", field: heartbeatThreadField, y: 280)
         addTextArea(to: content, label: "Heartbeat text", textView: heartbeatMessageTextView, y: 145, height: 105)
         addRow(to: content, label: "Codex args", field: codexArgsField, y: 105)
 
@@ -450,6 +455,7 @@ final class SettingsWindowController: NSWindowController {
         serverUrlField.stringValue = prefs.serverUrl
         intervalField.stringValue = String(prefs.heartbeatIntervalSeconds)
         heartbeatMessageTextView.string = prefs.heartbeatMessage
+        heartbeatThreadField.stringValue = prefs.heartbeatThread
         codexArgsField.stringValue = prefs.codexArgs
         keepHeartbeatCheckbox.state = prefs.keepHeartbeat ? .on : .off
     }
@@ -462,6 +468,7 @@ final class SettingsWindowController: NSWindowController {
         let serverName = serverNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let serverUrl = serverUrlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let heartbeatMessage = heartbeatMessageTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let heartbeatThread = heartbeatThreadField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let codexArgs = codexArgsField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let interval = Int(intervalField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)), interval > 0 else {
             showError("Interval must be a positive number of seconds.")
@@ -490,6 +497,7 @@ final class SettingsWindowController: NSWindowController {
                 $0.serverUrl = serverUrl
                 $0.heartbeatIntervalSeconds = interval
                 $0.heartbeatMessage = heartbeatMessage
+                $0.heartbeatThread = heartbeatThread
                 $0.codexArgs = codexArgs
                 $0.keepHeartbeat = keepHeartbeatCheckbox.state == .on
             }
@@ -995,6 +1003,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "--heartbeat-message", quoteShell(prefs.heartbeatMessage),
             "--heartbeat-cwd", quoteShell(cwd),
         ]
+        if !prefs.heartbeatThread.isEmpty {
+            parts += ["--heartbeat-thread", quoteShell(prefs.heartbeatThread)]
+        }
         if prefs.keepHeartbeat {
             parts.append("--keep-heartbeat")
         }

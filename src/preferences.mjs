@@ -8,6 +8,7 @@ export const DEFAULT_PREFERENCES = {
   serverUrl: 'ws://127.0.0.1:18654',
   heartbeatIntervalSeconds: 1800,
   heartbeatMessage: DEFAULT_MESSAGE,
+  heartbeatThread: '',
   codexArgs: '--yolo',
   keepHeartbeat: false,
 };

@@ -17,6 +17,7 @@ import {
 } from '../src/session-runner.mjs';
 import { serverStatus, stopServer } from '../src/server-manager.mjs';
 import { writeServerState, writeSessionState } from '../src/state.mjs';
+import { resolveThreadReferenceFromThreads } from '../src/thread-resolver.mjs';
 
 function makeHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-heartbeat-test-'));
@@ -351,6 +352,34 @@ test('resumeThreadForCwd resumes without turns through the app-server', async ()
       },
     },
   ]);
+});
+
+test('resolveThreadReferenceFromThreads resolves ids and exact names', () => {
+  const threads = [
+    { id: '019e1828-b1f3-7fa2-b626-18ca3c307262', name: null },
+    { id: '019de3ee-14f6-7250-a52c-4dbed01b36ef', name: 'e2e extended testing' },
+  ];
+
+  assert.equal(
+    resolveThreadReferenceFromThreads(threads, '019e1828-b1f3-7fa2-b626-18ca3c307262'),
+    '019e1828-b1f3-7fa2-b626-18ca3c307262',
+  );
+  assert.equal(
+    resolveThreadReferenceFromThreads(threads, 'e2e extended testing', { nameOnly: true }),
+    '019de3ee-14f6-7250-a52c-4dbed01b36ef',
+  );
+});
+
+test('resolveThreadReferenceFromThreads rejects duplicate names', () => {
+  const threads = [
+    { id: 'first', name: 'duplicate' },
+    { id: 'second', name: 'duplicate' },
+  ];
+
+  assert.throws(
+    () => resolveThreadReferenceFromThreads(threads, 'duplicate', { nameOnly: true }),
+    /Multiple threads are named/,
+  );
 });
 
 test('running unpinned sessions conflict on the same cwd and app-server url', () => {

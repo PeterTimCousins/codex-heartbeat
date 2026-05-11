@@ -7,6 +7,7 @@ import { DEFAULT_INTERVAL_SECONDS, DEFAULT_URL, stateRoot } from './paths.mjs';
 import { ensurePreferences, preferencesPath, readPreferences, writePreferences } from './preferences.mjs';
 import { serverStatus, startServer, stopServer } from './server-manager.mjs';
 import { listSessions, reapManagedState, removeSession, sessionStatus, startSession, stopSession } from './session-manager.mjs';
+import { resolveThreadReferenceFromAppServer } from './thread-resolver.mjs';
 
 function usage() {
   return `Usage:
@@ -15,14 +16,14 @@ function usage() {
   codex-heartbeat server stop [--name default]
   codex-heartbeat server status [--name default] [--json]
   codex-heartbeat remote [--server default] [-- <codex args...>]
-  codex-heartbeat codex [--server default] [--url ws://127.0.0.1:18654] [--heartbeat-name NAME] [--heartbeat-interval SECONDS] [--heartbeat-message TEXT] [--heartbeat-cwd PATH] [--no-heartbeat] [--keep-heartbeat] [codex args...]
-  codex-heartbeat session start --name NAME [--server default] [--url URL] [--cwd PATH] [--thread THREAD_ID] [--interval SECONDS] [--message TEXT] [--immediate] [--once]
+  codex-heartbeat codex [--server default] [--url ws://127.0.0.1:18654] [--heartbeat-name NAME] [--heartbeat-thread THREAD_ID_OR_NAME] [--heartbeat-thread-name NAME] [--heartbeat-interval SECONDS] [--heartbeat-message TEXT] [--heartbeat-cwd PATH] [--no-heartbeat] [--keep-heartbeat] [codex args...]
+  codex-heartbeat session start --name NAME [--server default] [--url URL] [--cwd PATH] [--thread THREAD_ID] [--thread-name NAME] [--interval SECONDS] [--message TEXT] [--immediate] [--once]
   codex-heartbeat session stop --name NAME
   codex-heartbeat session remove --name NAME [--force]
   codex-heartbeat session status --name NAME [--json]
   codex-heartbeat session list [--json]
   codex-heartbeat preferences [--json]
-  codex-heartbeat preferences set [--server-name NAME] [--server-url URL] [--heartbeat-interval SECONDS] [--heartbeat-message TEXT] [--codex-args TEXT] [--keep-heartbeat true|false]
+  codex-heartbeat preferences set [--server-name NAME] [--server-url URL] [--heartbeat-interval SECONDS] [--heartbeat-message TEXT] [--heartbeat-thread THREAD_ID_OR_NAME] [--codex-args TEXT] [--keep-heartbeat true|false]
   codex-heartbeat init [--build-menu] [--install-menu] [--json]
   codex-heartbeat doctor [--json]
   codex-heartbeat reap
@@ -64,6 +65,8 @@ function parseCodexWrapperOptions(argv) {
     heartbeat: true,
     keepHeartbeat: null,
     heartbeatName: null,
+    heartbeatThread: null,
+    heartbeatThreadName: null,
     heartbeatInterval: null,
     heartbeatMessage: null,
     heartbeatCwd: process.cwd(),
@@ -102,6 +105,20 @@ function parseCodexWrapperOptions(argv) {
       options.heartbeatName = argv[++i];
       if (!options.heartbeatName) {
         throw new Error('Missing value for --heartbeat-name');
+      }
+      continue;
+    }
+    if (arg === '--heartbeat-thread') {
+      options.heartbeatThread = argv[++i];
+      if (!options.heartbeatThread) {
+        throw new Error('Missing value for --heartbeat-thread');
+      }
+      continue;
+    }
+    if (arg === '--heartbeat-thread-name') {
+      options.heartbeatThreadName = argv[++i];
+      if (!options.heartbeatThreadName) {
+        throw new Error('Missing value for --heartbeat-thread-name');
       }
       continue;
     }
@@ -322,6 +339,7 @@ async function runCodex(argv) {
   const requestedUrl = options.url ?? preferences.serverUrl;
   const heartbeatInterval = options.heartbeatInterval ?? preferences.heartbeatIntervalSeconds;
   const heartbeatMessage = options.heartbeatMessage ?? preferences.heartbeatMessage;
+  const heartbeatThread = options.heartbeatThread ?? preferences.heartbeatThread;
   const keepHeartbeat = options.keepHeartbeat ?? preferences.keepHeartbeat;
   const heartbeatCwd = effectiveHeartbeatCwd(options);
   const existing = serverStatus(serverName);
@@ -375,9 +393,11 @@ async function runCodex(argv) {
   }
 
   if (options.heartbeat) {
+    const heartbeatThreadId = await resolveHeartbeatThreadId(url, { ...options, heartbeatThread });
     const result = await startSession({
       name: heartbeatName,
       cwd: heartbeatCwd,
+      threadId: heartbeatThreadId,
       intervalSeconds: heartbeatInterval,
       message: heartbeatMessage,
       url,
@@ -412,6 +432,32 @@ async function runCodex(argv) {
     cleanupHeartbeat('codex-wrapper-spawn-error');
     throw error;
   }
+}
+
+async function resolveHeartbeatThreadId(url, options) {
+  if (options.heartbeatThreadName) {
+    return resolveThreadReferenceFromAppServer(url, options.heartbeatThreadName, { nameOnly: true });
+  }
+  if (options.heartbeatThread) {
+    return resolveThreadReferenceFromAppServer(url, options.heartbeatThread);
+  }
+  return null;
+}
+
+async function serverUrlForThreadResolution(options) {
+  if (options.url) {
+    return options.url;
+  }
+  const serverName = options.server ?? 'default';
+  const existing = serverStatus(serverName);
+  if (existing.running) {
+    return existing.url;
+  }
+  if (serverName !== 'default') {
+    throw new Error(`Server ${serverName} is not running. Start it before resolving --thread-name.`);
+  }
+  const started = await startServer({ name: serverName, url: DEFAULT_URL });
+  return started.state?.url ?? DEFAULT_URL;
 }
 
 async function runServer(command, argv) {
@@ -455,15 +501,23 @@ async function runSession(command, argv) {
   const options = parseOptions(argv);
   if (command === 'start') {
     const preferences = readPreferences();
+    let threadId = options.thread ?? null;
+    let url = options.url;
+    if (options['thread-name']) {
+      url = await serverUrlForThreadResolution(options);
+      threadId = await resolveThreadReferenceFromAppServer(url, options['thread-name'], {
+        nameOnly: true,
+      });
+    }
     const result = await startSession({
       name: options.name,
       cwd: options.cwd,
-      threadId: options.thread,
+      threadId,
       intervalSeconds: options.interval ?? preferences.heartbeatIntervalSeconds,
       message: options.message ?? preferences.heartbeatMessage,
       once: options.once,
       immediate: options.immediate,
-      url: options.url,
+      url,
       serverName: options.server,
     });
     if (result.started) {
@@ -550,6 +604,7 @@ function runPreferences(command, argv) {
       console.log(`  URL: ${preferences.serverUrl}`);
       console.log(`  Interval: ${preferences.heartbeatIntervalSeconds}s`);
       console.log(`  Heartbeat message: ${preferences.heartbeatMessage}`);
+      console.log(`  Heartbeat thread: ${preferences.heartbeatThread || '(auto)'}`);
       console.log(`  Codex args: ${preferences.codexArgs}`);
       console.log(`  Keep heartbeat: ${preferences.keepHeartbeat ? 'yes' : 'no'}`);
     }
@@ -575,6 +630,9 @@ function runPreferences(command, argv) {
         throw new Error('--heartbeat-message cannot be empty');
       }
       preferences.heartbeatMessage = options['heartbeat-message'];
+    }
+    if (options['heartbeat-thread'] !== undefined) {
+      preferences.heartbeatThread = options['heartbeat-thread'];
     }
     if (options['codex-args'] !== undefined) {
       preferences.codexArgs = options['codex-args'];
