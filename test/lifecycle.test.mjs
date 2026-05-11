@@ -208,6 +208,41 @@ test('startSession can preserve an unpinned initial thread across restarts', asy
   }
 });
 
+test('startSession preserves previous heartbeat timing across restarts', async () => {
+  const home = makeHome();
+  try {
+    writeSessionState('timed-session', {
+      name: 'timed-session',
+      serverName: null,
+      url: 'ws://127.0.0.1:19016',
+      cwd: process.cwd(),
+      intervalSeconds: 60,
+      status: 'stopped',
+      pid: null,
+      createdAt: '2026-05-11T19:00:00.000Z',
+    });
+    const logDir = path.join(home, 'sessions', 'timed-session', 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(logDir, 'heartbeat.20260511-193000.log'),
+      '2026-05-11T19:30:00.000Z send heartbeat (interval) thread=abc\n',
+    );
+
+    const result = await startSession({
+      name: 'timed-session',
+      cwd: process.cwd(),
+      url: 'ws://127.0.0.1:19016',
+      intervalSeconds: 120,
+    });
+
+    assert.equal(result.state.lastHeartbeatAt, '2026-05-11T19:30:00.000Z');
+    assert.equal(result.state.nextHeartbeatAt, null);
+    stopSession('timed-session', 'test-cleanup');
+  } finally {
+    cleanupHome(home);
+  }
+});
+
 test('unpinned sessions follow cwd threads and explicit thread sessions stay pinned', () => {
   assert.equal(shouldFollowCwdThread({ threadId: null }), true);
   assert.equal(shouldFollowCwdThread({ threadId: 'auto-selected-thread', threadPinned: false }), true);

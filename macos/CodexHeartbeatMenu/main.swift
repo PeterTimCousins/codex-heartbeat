@@ -75,6 +75,7 @@ struct SessionStatus: Decodable {
     let statusDetail: String?
     let logFile: String?
     let lastHeartbeatAt: String?
+    let nextHeartbeatAt: String?
     let queuedHeartbeat: Bool?
     let createdAt: String?
     let updatedAt: String?
@@ -212,6 +213,12 @@ func nextHeartbeatText(_ session: SessionStatus) -> String {
     }
     if session.queuedHeartbeat == true {
         return "queued; sends when idle"
+    }
+    if let next = parseTimestamp(session.nextHeartbeatAt) {
+        if next <= Date() {
+            return "due now"
+        }
+        return formatTimestamp(next)
     }
     guard let base = parseTimestamp(session.lastHeartbeatAt) ?? parseTimestamp(session.createdAt) else {
         return "pending"

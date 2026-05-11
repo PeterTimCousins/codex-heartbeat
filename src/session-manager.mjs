@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileTimestamp, slugifyName } from './fs-util.mjs';
@@ -41,6 +42,31 @@ function sessionFollowsCwd(session) {
   return !session.threadId;
 }
 
+function inferLastHeartbeatAt(name) {
+  const dir = sessionLogDir(name);
+  if (!fs.existsSync(dir)) {
+    return null;
+  }
+  let latest = null;
+  for (const entry of fs.readdirSync(dir)) {
+    if (!entry.startsWith('heartbeat.') || !entry.endsWith('.log')) {
+      continue;
+    }
+    const logPath = path.join(dir, entry);
+    const text = fs.readFileSync(logPath, 'utf8');
+    for (const line of text.split('\n')) {
+      const match = line.match(/^(\S+) send heartbeat /);
+      if (!match) {
+        continue;
+      }
+      if (!latest || Date.parse(match[1]) > Date.parse(latest)) {
+        latest = match[1];
+      }
+    }
+  }
+  return latest;
+}
+
 export function findUnpinnedCwdConflict({ name, cwd, url }) {
   const resolvedCwd = path.resolve(cwd);
   return listSessions().find(
@@ -64,6 +90,7 @@ export async function startSession(options) {
     throw new Error('--interval must be a positive number of seconds');
   }
   const existing = readSessionState(name);
+  const lastHeartbeatAt = existing?.lastHeartbeatAt ?? inferLastHeartbeatAt(name);
   if (existing?.pid && isSessionRunnerRunning(existing)) {
     return { started: false, state: existing, message: `Session ${name} already running with pid ${existing.pid}` };
   }
@@ -116,6 +143,8 @@ export async function startSession(options) {
     commandFragment: sessionCommandFragment(name),
     logFile,
     createdAt: existing?.createdAt ?? new Date().toISOString(),
+    lastHeartbeatAt,
+    nextHeartbeatAt: null,
     updatedAt: new Date().toISOString(),
   };
   writeSessionState(name, state);
@@ -165,8 +194,10 @@ export function sessionStatus(name) {
   if (!state) {
     return null;
   }
+  const lastHeartbeatAt = state.lastHeartbeatAt ?? inferLastHeartbeatAt(safeName);
   return {
     ...state,
+    lastHeartbeatAt,
     running: isSessionRunnerRunning(state),
     stopped: hasStopMarker(safeName),
   };

@@ -185,6 +185,10 @@ async function main() {
     updateSessionState(name, updates);
   }
 
+  function isoFromMs(ms) {
+    return new Date(ms).toISOString();
+  }
+
   async function refreshTarget() {
     if (followCwdThread) {
       const targetAtRefreshStart = targetThreadId;
@@ -255,6 +259,15 @@ async function main() {
     return thread;
   }
 
+  const heartbeatIntervalMs = Math.max(1, Number(state.intervalSeconds)) * 1000;
+  const pollMs = pollIntervalMs(state.intervalSeconds);
+  let nextHeartbeatAt = Date.now() + heartbeatIntervalMs;
+
+  function scheduleNextHeartbeat(fromMs = Date.now()) {
+    nextHeartbeatAt = fromMs + heartbeatIntervalMs;
+    mark({ nextHeartbeatAt: isoFromMs(nextHeartbeatAt) });
+  }
+
   async function sendHeartbeat(reason) {
     const thread = await refreshTarget();
     if (!thread) {
@@ -264,7 +277,12 @@ async function main() {
 
     if (targetStatus === 'active') {
       queuedHeartbeat = true;
-      mark({ status: 'active', queuedHeartbeat: true });
+      mark({
+        status: 'active',
+        statusDetail: 'Heartbeat queued; target thread is active',
+        queuedHeartbeat: true,
+        nextHeartbeatAt: null,
+      });
       appendLine(logFile, `queue heartbeat (${reason}): target thread is active`);
       return false;
     }
@@ -280,7 +298,15 @@ async function main() {
       input: [{ type: 'text', text: state.message }],
     });
     sentOnce = true;
-    mark({ status: 'active', queuedHeartbeat: false, lastHeartbeatAt: new Date().toISOString() });
+    const sentAt = Date.now();
+    scheduleNextHeartbeat(sentAt);
+    mark({
+      status: 'active',
+      statusDetail: null,
+      queuedHeartbeat: false,
+      lastHeartbeatAt: isoFromMs(sentAt),
+      nextHeartbeatAt: isoFromMs(nextHeartbeatAt),
+    });
     return true;
   }
 
@@ -477,13 +503,11 @@ async function main() {
     }
   }
 
+  scheduleNextHeartbeat(Date.now());
+
   if (state.immediate) {
     await sendHeartbeat(state.once ? 'once' : 'immediate');
   }
-
-  const heartbeatIntervalMs = Math.max(1, Number(state.intervalSeconds)) * 1000;
-  const pollMs = pollIntervalMs(state.intervalSeconds);
-  let nextHeartbeatAt = Date.now() + heartbeatIntervalMs;
 
   while (!state.once || !sentOnce || targetStatus === 'active') {
     if (hasStopMarker(name)) {
@@ -520,8 +544,10 @@ async function main() {
     }
 
     if (!state.once && Date.now() >= nextHeartbeatAt) {
-      await sendHeartbeat('interval');
-      nextHeartbeatAt = Date.now() + heartbeatIntervalMs;
+      const sent = await sendHeartbeat('interval');
+      if (!sent && !queuedHeartbeat) {
+        scheduleNextHeartbeat(Date.now());
+      }
     }
   }
 
