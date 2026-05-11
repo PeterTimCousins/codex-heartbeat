@@ -7,7 +7,9 @@ import { isMatchingPidRunning, spawnDetached, terminateMatchingPid } from './pro
 import { serverStatus, startServer, stopServer } from './server-manager.mjs';
 import {
   clearStopMarker,
+  clearTriggerMarker,
   deleteSessionState,
+  hasTriggerMarker,
   listServerNames,
   hasStopMarker,
   listSessionNames,
@@ -15,6 +17,7 @@ import {
   updateSessionState,
   writeSessionState,
   writeStopMarker,
+  writeTriggerMarker,
 } from './state.mjs';
 
 function sessionCommandFragment(name) {
@@ -125,6 +128,7 @@ export async function startSession(options) {
   }
 
   clearStopMarker(name);
+  clearTriggerMarker(name);
 
   const logFile = path.join(sessionLogDir(name), `heartbeat.${fileTimestamp()}.log`);
   const state = {
@@ -172,6 +176,23 @@ export function stopSession(name, reason = 'manual') {
   return { stopped, state };
 }
 
+export function triggerSession(name, reason = 'manual') {
+  const safeName = slugifyName(name);
+  const state = readSessionState(safeName);
+  if (!state) {
+    return { triggered: false, message: `Session ${safeName} not found` };
+  }
+  if (!isSessionRunnerRunning(state)) {
+    return { triggered: false, message: `Session ${safeName} is not running` };
+  }
+  writeTriggerMarker(safeName, reason);
+  updateSessionState(safeName, {
+    statusDetail: 'Manual heartbeat requested',
+    nextHeartbeatAt: null,
+  });
+  return { triggered: true, name: safeName };
+}
+
 export function removeSession(name, { force = false } = {}) {
   const safeName = slugifyName(name);
   const state = readSessionState(safeName);
@@ -200,6 +221,7 @@ export function sessionStatus(name) {
     lastHeartbeatAt,
     running: isSessionRunnerRunning(state),
     stopped: hasStopMarker(safeName),
+    triggerPending: hasTriggerMarker(safeName),
   };
 }
 

@@ -77,6 +77,7 @@ struct SessionStatus: Decodable {
     let lastHeartbeatAt: String?
     let nextHeartbeatAt: String?
     let queuedHeartbeat: Bool?
+    let triggerPending: Bool?
     let createdAt: String?
     let updatedAt: String?
     let message: String?
@@ -213,6 +214,9 @@ func nextHeartbeatText(_ session: SessionStatus) -> String {
     }
     if session.queuedHeartbeat == true {
         return "queued; sends when idle"
+    }
+    if session.triggerPending == true {
+        return "trigger requested"
     }
     if let next = parseTimestamp(session.nextHeartbeatAt) {
         if next <= Date() {
@@ -735,8 +739,9 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         addButton(to: content, title: "Start", action: #selector(startSession), frame: NSRect(x: 24, y: 74, width: 72, height: 30))
         addButton(to: content, title: "Stop", action: #selector(stopSession), frame: NSRect(x: 104, y: 74, width: 72, height: 30))
         addButton(to: content, title: "Restart", action: #selector(restartSession), frame: NSRect(x: 184, y: 74, width: 82, height: 30))
-        addButton(to: content, title: "Remove", action: #selector(removeSession), frame: NSRect(x: 274, y: 74, width: 82, height: 30))
-        addButton(to: content, title: "Open Log", action: #selector(openLog), frame: NSRect(x: 364, y: 74, width: 86, height: 30))
+        addButton(to: content, title: "Trigger", action: #selector(triggerSession), frame: NSRect(x: 274, y: 74, width: 82, height: 30))
+        addButton(to: content, title: "Remove", action: #selector(removeSession), frame: NSRect(x: 364, y: 74, width: 82, height: 30))
+        addButton(to: content, title: "Open Log", action: #selector(openLog), frame: NSRect(x: 454, y: 74, width: 86, height: 30))
 
         buildSettingsPanel(content)
 
@@ -1085,6 +1090,11 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         restart(session)
     }
 
+    @objc private func triggerSession() {
+        guard let session = selectedSession() else { return }
+        runCommand(["session", "trigger", "--name", session.name])
+    }
+
     @objc private func removeSession() {
         guard let session = selectedSession() else { return }
         let alert = NSAlert()
@@ -1258,6 +1268,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             restart.target = self
             restart.representedObject = session
             submenu.addItem(restart)
+
+            let trigger = NSMenuItem(title: "Trigger Heartbeat Now", action: #selector(triggerSession(_:)), keyEquivalent: "")
+            trigger.target = self
+            trigger.representedObject = session.name
+            submenu.addItem(trigger)
 
             let stop = NSMenuItem(title: "Stop Heartbeat", action: #selector(stopSession(_:)), keyEquivalent: "")
             stop.target = self
@@ -1473,6 +1488,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func stopSession(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
         runCommand(["session", "stop", "--name", name])
+    }
+
+    @objc private func triggerSession(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        runCommand(["session", "trigger", "--name", name])
     }
 
     @objc private func startSession(_ sender: NSMenuItem) {

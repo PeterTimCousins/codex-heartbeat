@@ -7,7 +7,7 @@ import { slugifyName } from './fs-util.mjs';
 import { DEFAULT_INTERVAL_SECONDS, DEFAULT_URL, stateRoot } from './paths.mjs';
 import { ensurePreferences, preferencesPath, readPreferences, writePreferences } from './preferences.mjs';
 import { serverStatus, startServer, stopServer } from './server-manager.mjs';
-import { listSessions, reapManagedState, removeSession, sessionStatus, startSession, stopSession } from './session-manager.mjs';
+import { listSessions, reapManagedState, removeSession, sessionStatus, startSession, stopSession, triggerSession } from './session-manager.mjs';
 import { resolveThreadReferenceFromAppServer } from './thread-resolver.mjs';
 
 function usage() {
@@ -19,6 +19,7 @@ function usage() {
   codex-heartbeat remote [--server default] [-- <codex args...>]
   codex-heartbeat codex [--server default] [--url ws://127.0.0.1:18654] [--heartbeat-name NAME] [--heartbeat-thread THREAD_ID_OR_NAME] [--heartbeat-thread-name NAME] [--heartbeat-interval SECONDS] [--heartbeat-message TEXT] [--heartbeat-cwd PATH] [--no-heartbeat] [--keep-heartbeat] [codex args...]
   codex-heartbeat session start --name NAME [--server default] [--url URL] [--cwd PATH] [--thread THREAD_ID] [--thread-name NAME] [--initial-thread THREAD_ID] [--interval SECONDS] [--message TEXT] [--immediate] [--once]
+  codex-heartbeat session trigger --name NAME
   codex-heartbeat session stop --name NAME
   codex-heartbeat session remove --name NAME [--force]
   codex-heartbeat session status --name NAME [--json]
@@ -538,6 +539,14 @@ async function runSession(command, argv) {
     }
     const result = stopSession(options.name);
     console.log(result.stopped ? `Stopped heartbeat session ${options.name}` : result.message);
+    return;
+  }
+  if (command === 'trigger') {
+    if (!options.name) {
+      throw new Error('--name is required');
+    }
+    const result = triggerSession(options.name);
+    console.log(result.triggered ? `Triggered heartbeat session ${result.name}` : result.message);
     return;
   }
   if (command === 'remove' || command === 'delete') {

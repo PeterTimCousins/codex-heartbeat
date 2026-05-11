@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { extractResumeThreadId, parseResumeLogRows } from '../src/codex-log-watch.mjs';
-import { findUnpinnedCwdConflict, reapManagedState, removeSession, sessionStatus, startSession, stopSession } from '../src/session-manager.mjs';
+import { findUnpinnedCwdConflict, reapManagedState, removeSession, sessionStatus, startSession, stopSession, triggerSession } from '../src/session-manager.mjs';
 import {
   compareThreadRecency,
   findLoadedThreadForCwd,
@@ -18,7 +18,7 @@ import {
   shouldUseRecentThreadListFallback,
 } from '../src/session-runner.mjs';
 import { serverStatus, stopServer } from '../src/server-manager.mjs';
-import { writeServerState, writeSessionState } from '../src/state.mjs';
+import { hasTriggerMarker, writeServerState, writeSessionState } from '../src/state.mjs';
 import { resolveThreadReferenceFromThreads } from '../src/thread-resolver.mjs';
 
 function makeHome() {
@@ -238,6 +238,32 @@ test('startSession preserves previous heartbeat timing across restarts', async (
     assert.equal(result.state.lastHeartbeatAt, '2026-05-11T19:30:00.000Z');
     assert.equal(result.state.nextHeartbeatAt, null);
     stopSession('timed-session', 'test-cleanup');
+  } finally {
+    cleanupHome(home);
+  }
+});
+
+test('triggerSession marks a running session for immediate heartbeat', () => {
+  const home = makeHome();
+  try {
+    writeSessionState('triggerable-session', {
+      name: 'triggerable-session',
+      serverName: null,
+      url: 'ws://127.0.0.1:19017',
+      cwd: process.cwd(),
+      intervalSeconds: 60,
+      status: 'idle',
+      pid: process.pid,
+      commandFragment: '',
+    });
+
+    const result = triggerSession('triggerable-session');
+
+    assert.equal(result.triggered, true);
+    assert.equal(hasTriggerMarker('triggerable-session'), true);
+    const status = sessionStatus('triggerable-session');
+    assert.equal(status.triggerPending, true);
+    assert.equal(status.statusDetail, 'Manual heartbeat requested');
   } finally {
     cleanupHome(home);
   }

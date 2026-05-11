@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { AppServerClient } from './app-server-client.mjs';
 import { extractResumeThreadId, readCodexLogHighWatermark, readCodexResumeLogRows } from './codex-log-watch.mjs';
 import { appendLine } from './fs-util.mjs';
-import { hasStopMarker, readSessionState, updateSessionState } from './state.mjs';
+import { clearTriggerMarker, hasStopMarker, hasTriggerMarker, readSessionState, updateSessionState } from './state.mjs';
 
 function parseArgs(argv) {
   const args = { name: null };
@@ -541,6 +541,13 @@ async function main() {
     if (targetStatus === 'idle' && queuedHeartbeat) {
       queuedHeartbeat = false;
       await sendHeartbeat('queued-after-poll-idle');
+    }
+
+    if (hasTriggerMarker(name)) {
+      clearTriggerMarker(name);
+      appendLine(logFile, 'manual trigger marker found');
+      await sendHeartbeat('manual-trigger');
+      continue;
     }
 
     if (!state.once && Date.now() >= nextHeartbeatAt) {

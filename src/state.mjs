@@ -32,6 +32,10 @@ export function sessionStopPath(name) {
   return path.join(sessionDir(name), 'stop');
 }
 
+export function sessionTriggerPath(name) {
+  return path.join(sessionDir(name), 'trigger');
+}
+
 export function readSessionState(name) {
   return readJson(sessionStatePath(name), null);
 }
@@ -76,4 +80,20 @@ export function clearStopMarker(name) {
 
 export function hasStopMarker(name) {
   return fs.existsSync(sessionStopPath(name));
+}
+
+export function writeTriggerMarker(name, reason = 'manual') {
+  ensureDir(sessionDir(name));
+  fs.writeFileSync(sessionTriggerPath(name), `requested_at=${new Date().toISOString()}\nreason=${reason}\n`);
+}
+
+export function clearTriggerMarker(name) {
+  const triggerPath = sessionTriggerPath(name);
+  if (fs.existsSync(triggerPath)) {
+    fs.rmSync(triggerPath, { force: true });
+  }
+}
+
+export function hasTriggerMarker(name) {
+  return fs.existsSync(sessionTriggerPath(name));
 }

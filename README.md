@@ -122,6 +122,12 @@ node bin/codex-heartbeat.mjs session list
 node bin/codex-heartbeat.mjs session status --name dropship-main
 ```
 
+Trigger a running session to send one heartbeat as soon as the target thread is idle:
+
+```bash
+node bin/codex-heartbeat.mjs session trigger --name dropship-main
+```
+
 Inspect or update defaults used by the menu app:
 
 ```bash
