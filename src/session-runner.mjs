@@ -222,6 +222,8 @@ async function main() {
   let claimNewThread = Boolean(state.claimNewThread && !state.threadId);
   const claimThreadAfter = Number(state.claimThreadAfter ?? 0);
   const followCwdThread = !claimNewThread && shouldFollowCwdThread(state);
+  let followResumeLog = Boolean(state.followResumeLog);
+  const followResumeLogUntil = Date.parse(state.followResumeLogUntil ?? '');
   let recentThreadListAfterUpdatedAt = Math.floor(Date.now() / 1000);
   const handledRecentThreadListIds = new Set();
   let codexResumeLogLastSeenId = 0;
@@ -245,6 +247,9 @@ async function main() {
           statusDetail: `Waiting for a new loaded thread for cwd ${state.cwd}`,
         });
         return null;
+      }
+      if (!claimNewThread || targetThreadId) {
+        return refreshTarget();
       }
       claimThread(thread, 'claim-new-thread');
       return thread;
@@ -402,6 +407,15 @@ async function main() {
     });
   }
 
+  function disableResumeLog(reason) {
+    if (!followResumeLog) {
+      return;
+    }
+    followResumeLog = false;
+    mark({ followResumeLog: false, followResumeLogUntil: null });
+    appendLine(logFile, `Codex /resume log detection disabled: ${reason}`);
+  }
+
   async function retargetToMatchingThread(threadId, reason, statusOverride = null) {
     if (!followCwdThread || !threadId || threadId === targetThreadId) {
       return false;
@@ -455,8 +469,14 @@ async function main() {
   }
 
   async function retargetFromCodexResumeLog() {
-    if (!followCwdThread || !codexResumeLogEnabled) {
+    if ((!followCwdThread && !followResumeLog) || !codexResumeLogEnabled) {
       return false;
+    }
+    if (followResumeLog && Number.isFinite(followResumeLogUntil) && Date.now() > followResumeLogUntil) {
+      disableResumeLog('settle window expired');
+      if (!followCwdThread) {
+        return false;
+      }
     }
 
     let rows;
@@ -479,13 +499,38 @@ async function main() {
         continue;
       }
       appendLine(logFile, `detected Codex /resume log for thread ${threadId}`);
-      const didRetarget = await retargetToMatchingThread(threadId, 'codex-resume-log');
+      const didRetarget = followCwdThread
+        ? await retargetToMatchingThread(threadId, 'codex-resume-log')
+        : await retargetToResumeLogThread(threadId);
       if (!didRetarget) {
         appendLine(logFile, `Codex /resume log thread ${threadId} is not a loaded match for cwd ${state.cwd}`);
       }
       retargeted = retargeted || didRetarget;
     }
     return retargeted;
+  }
+
+  async function retargetToResumeLogThread(threadId) {
+    if (!followResumeLog || !threadId) {
+      return false;
+    }
+    const thread = await readLoadedThreadForCwd(client, threadId, state.cwd, logFile);
+    if (!thread) {
+      return false;
+    }
+    setTargetThread(thread, 'codex-resume-log');
+    claimNewThread = false;
+    disableResumeLog('retargeted to resumed thread');
+    mark({
+      claimNewThread: false,
+      threadPinned: true,
+      statusDetail: null,
+    });
+    if (targetStatus === 'idle' && queuedHeartbeat) {
+      queuedHeartbeat = false;
+      await sendHeartbeat('queued-after-codex-resume-log');
+    }
+    return true;
   }
 
   client.on('thread/status/changed', (params) => {
@@ -579,18 +624,26 @@ async function main() {
 
   await client.connect();
   await client.initialize('codex-heartbeat-session');
-  await refreshTarget();
 
-  if (followCwdThread) {
-    const resumeLog = readCodexLogHighWatermark();
-    if (resumeLog.ok) {
+  if (followCwdThread || followResumeLog) {
+    const savedHighWatermark = Number(state.followResumeLogHighWatermark);
+    if (followResumeLog && Number.isFinite(savedHighWatermark) && savedHighWatermark >= 0) {
       codexResumeLogEnabled = true;
-      codexResumeLogLastSeenId = resumeLog.lastSeenId;
-      appendLine(logFile, `Codex /resume log detection enabled from log id ${codexResumeLogLastSeenId}`);
+      codexResumeLogLastSeenId = Math.floor(savedHighWatermark);
+      appendLine(logFile, `Codex /resume log detection enabled from launch log id ${codexResumeLogLastSeenId}`);
     } else {
-      appendLine(logFile, `Codex /resume log detection disabled: ${resumeLog.reason}`);
+      const resumeLog = readCodexLogHighWatermark();
+      if (resumeLog.ok) {
+        codexResumeLogEnabled = true;
+        codexResumeLogLastSeenId = resumeLog.lastSeenId;
+        appendLine(logFile, `Codex /resume log detection enabled from log id ${codexResumeLogLastSeenId}`);
+      } else {
+        appendLine(logFile, `Codex /resume log detection disabled: ${resumeLog.reason}`);
+      }
     }
   }
+
+  await refreshTarget();
 
   scheduleNextHeartbeat(Date.now());
 

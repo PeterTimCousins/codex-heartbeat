@@ -219,6 +219,35 @@ test('startSession can preserve an unpinned initial thread across restarts', asy
   }
 });
 
+test('startSession enables a short resume-log follow window for claim-new-thread sessions', async () => {
+  const home = makeHome();
+  const previousCodexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = path.join(home, 'codex');
+  try {
+    const result = await startSession({
+      name: 'claim-resume-window',
+      url: 'ws://127.0.0.1:19019',
+      cwd: process.cwd(),
+      claimNewThread: true,
+      intervalSeconds: 300,
+    });
+
+    assert.equal(result.state.claimNewThread, true);
+    assert.equal(result.state.followResumeLog, true);
+    assert.equal(Number.isFinite(Date.parse(result.state.followResumeLogUntil)), true);
+    assert.equal(result.state.followResumeLogHighWatermark, null);
+    assert.match(result.state.followResumeLogUnavailableReason, /Codex log database not found/);
+    stopSession('claim-resume-window', 'test-cleanup');
+  } finally {
+    if (previousCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = previousCodexHome;
+    }
+    cleanupHome(home);
+  }
+});
+
 test('startSession preserves previous heartbeat timing across restarts', async () => {
   const home = makeHome();
   try {

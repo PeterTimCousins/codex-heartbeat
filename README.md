@@ -181,6 +181,7 @@ The heartbeat worker treats `loaded + idle` as the only safe send condition:
 - If the thread is `active`, it queues one heartbeat and sends after the thread becomes idle.
 - Sessions started without `--thread` follow the active loaded thread for the configured cwd. They retarget on app-server `thread/started` and `thread/status/changed` events, and they use app-server `thread/list` plus `thread/resume` as a conservative fallback when `/resume` updates recency without emitting a loaded-thread event.
 - For unpinned sessions, the worker also watches Codex's local `~/.codex/logs_2.sqlite` resume lifecycle log as a best-effort `/resume` detector. This is used only to notice an already-loaded resumed thread, and the candidate is still verified through the app-server as a loaded thread for the same cwd before retargeting. If the log database or `sqlite3` command is unavailable, normal heartbeat behavior continues without this detector.
+- Wrapper-launched sessions without `--heartbeat-name` start with a unique session name and claim the first new Codex thread for that wrapper. They also keep a short `/resume` follow window open after launch, so if you immediately run `/resume` in the fresh TUI, the heartbeat retargets to that resumed thread and then pins itself there.
 - Sessions started with `--thread` are pinned to that exact thread. The wrapper also accepts `--heartbeat-thread THREAD_ID_OR_NAME` and `--heartbeat-thread-name NAME`, which is the reliable path when launching directly into an existing thread with `codex resume`.
 - Only one running unpinned session can follow a given cwd on a given app-server URL. Start a second session with `--thread` if you deliberately need exact thread pinning.
 - If no matching thread is loaded, an unpinned session waits for one to appear.
@@ -200,10 +201,12 @@ For unpinned sessions, `codex-heartbeat` therefore uses a best-effort detector:
 - It extracts the resumed thread ID, then verifies through the app-server that the thread is loaded and belongs to the same cwd before retargeting.
 - If `~/.codex/logs_2.sqlite` or `sqlite3` is unavailable, the worker logs that detection is disabled and continues with normal heartbeat behavior.
 
+For `codex-heartbeat codex` wrapper sessions, the high-watermark is captured before launching the Codex child process. That protects the common flow where Codex opens a fresh thread and you immediately run `/resume`. The wrapper session follows `/resume` for a short settle window, then pins itself to the selected thread. This still depends on private Codex log details and cannot prove which terminal tab produced a `/resume`, so the most deterministic path is still `--heartbeat-thread` when you already know the target thread.
+
 This relies on Codex private local log details, so it may need adjustment if Codex changes its logging. To verify it worked, open the session log shown by `codex-heartbeat status` and look for lines like:
 
 ```text
-Codex /resume log detection enabled from log id ...
+Codex /resume log detection enabled from launch log id ...
 detected Codex /resume log for thread <thread-id>
 retargeted from thread <old-id> to codex-resume-log thread <new-id> status=idle
 ```

@@ -5,6 +5,7 @@ import { fileTimestamp, slugifyName } from './fs-util.mjs';
 import { DEFAULT_INTERVAL_SECONDS, DEFAULT_MESSAGE, DEFAULT_URL, sessionDir, sessionLogDir } from './paths.mjs';
 import { isMatchingPidRunning, spawnDetached, terminateMatchingPid } from './processes.mjs';
 import { serverStatus, startServer, stopServer } from './server-manager.mjs';
+import { readCodexLogHighWatermark } from './codex-log-watch.mjs';
 import {
   clearStopMarker,
   clearTriggerMarker,
@@ -92,6 +93,8 @@ export async function startSession(options) {
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const threadPinned = Boolean(options.threadId);
   const claimNewThread = Boolean(options.claimNewThread && !threadPinned);
+  const followResumeLog = Boolean(options.followResumeLog ?? claimNewThread);
+  const resumeLogHighWatermark = followResumeLog ? readCodexLogHighWatermark() : null;
   const initialThreadId = options.threadId ?? options.initialThreadId ?? null;
   if (!Number.isFinite(intervalSeconds) || intervalSeconds < 1) {
     throw new Error('--interval must be a positive number of seconds');
@@ -144,6 +147,13 @@ export async function startSession(options) {
     threadPinned,
     claimNewThread,
     claimThreadAfter: claimNewThread ? Math.floor(Date.now() / 1000) : null,
+    followResumeLog,
+    followResumeLogUntil: followResumeLog ? new Date(Date.now() + 120_000).toISOString() : null,
+    followResumeLogHighWatermark: resumeLogHighWatermark?.ok ? resumeLogHighWatermark.lastSeenId : null,
+    followResumeLogUnavailableReason:
+      followResumeLog && resumeLogHighWatermark && !resumeLogHighWatermark.ok
+        ? resumeLogHighWatermark.reason
+        : null,
     intervalSeconds,
     message: options.message ?? DEFAULT_MESSAGE,
     once: Boolean(options.once),
