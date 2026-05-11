@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { appendLine, ensureDir } from './fs-util.mjs';
@@ -17,6 +17,36 @@ export function isPidRunning(pid) {
 
 export function terminatePid(pid) {
   if (!isPidRunning(pid)) {
+    return false;
+  }
+  process.kill(Number(pid), 'SIGTERM');
+  return true;
+}
+
+export function processCommand(pid) {
+  if (!isPidRunning(pid)) {
+    return null;
+  }
+  const result = spawnSync('ps', ['-p', String(pid), '-o', 'command='], {
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    return null;
+  }
+  const command = result.stdout.trim();
+  return command || null;
+}
+
+export function isMatchingPidRunning(pid, commandFragment) {
+  if (!commandFragment) {
+    return isPidRunning(pid);
+  }
+  const command = processCommand(pid);
+  return Boolean(command && command.includes(commandFragment));
+}
+
+export function terminateMatchingPid(pid, commandFragment) {
+  if (!isMatchingPidRunning(pid, commandFragment)) {
     return false;
   }
   process.kill(Number(pid), 'SIGTERM');

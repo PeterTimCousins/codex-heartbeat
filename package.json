@@ -8,6 +8,11 @@
     "codex-heartbeat": "./bin/codex-heartbeat.mjs"
   },
   "scripts": {
+    "build:menu": "scripts/build-menu-bar.sh",
+    "install:menu": "scripts/install-menu-app.sh",
+    "menu": "scripts/run-menu-bar.sh",
+    "setup": "scripts/setup.sh",
+    "uninstall:menu": "scripts/uninstall-launch-agent.sh",
     "smoke": "node bin/codex-heartbeat.mjs --help && node bin/codex-heartbeat.mjs status",
     "test": "node --test"
   },

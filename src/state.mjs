@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ensureDir, readJson, writeJson } from './fs-util.mjs';
-import { serverDir, sessionDir, sessionsRoot } from './paths.mjs';
+import { serverDir, serversRoot, sessionDir, sessionsRoot } from './paths.mjs';
 
 export function serverStatePath(name = 'default') {
   return path.join(serverDir(name), 'server.json');
@@ -13,6 +13,15 @@ export function readServerState(name = 'default') {
 
 export function writeServerState(name, state) {
   writeJson(serverStatePath(name), state);
+}
+
+export function listServerNames() {
+  ensureDir(serversRoot());
+  return fs
+    .readdirSync(serversRoot(), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
 }
 
 export function sessionStatePath(name) {
@@ -29,6 +38,10 @@ export function readSessionState(name) {
 
 export function writeSessionState(name, state) {
   writeJson(sessionStatePath(name), state);
+}
+
+export function deleteSessionState(name) {
+  fs.rmSync(sessionDir(name), { recursive: true, force: true });
 }
 
 export function updateSessionState(name, updates) {

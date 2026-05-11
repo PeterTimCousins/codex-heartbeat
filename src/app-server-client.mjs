@@ -7,11 +7,14 @@ export class AppServerClient {
     this.nextId = 1;
     this.pending = new Map();
     this.handlers = new Map();
+    this.closedByClient = false;
   }
 
   async connect() {
     this.ws = new WebSocket(this.url);
     this.ws.addEventListener('message', (event) => this.handleMessage(event.data));
+    this.ws.addEventListener('close', (event) => this.handleClose(event));
+    this.ws.addEventListener('error', (event) => this.handleError(event));
     await new Promise((resolve, reject) => {
       this.ws.addEventListener('open', resolve, { once: true });
       this.ws.addEventListener('error', reject, { once: true });
@@ -49,8 +52,44 @@ export class AppServerClient {
 
   close() {
     if (this.ws) {
+      this.closedByClient = true;
       this.ws.close();
     }
+  }
+
+  emit(method, params) {
+    const handlers = this.handlers.get(method) ?? [];
+    for (const handler of handlers) {
+      handler(params);
+    }
+  }
+
+  rejectPending(error) {
+    for (const [id, pending] of this.pending.entries()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+      this.pending.delete(id);
+    }
+  }
+
+  handleClose(event) {
+    const reason = event?.reason ? ` reason=${event.reason}` : '';
+    const message = `App-server WebSocket closed code=${event?.code ?? 'unknown'}${reason}`;
+    if (this.logFile) {
+      appendLine(this.logFile, message);
+    }
+    this.rejectPending(new Error(message));
+    if (!this.closedByClient) {
+      this.emit('websocket/closed', { code: event?.code ?? null, reason: event?.reason ?? null });
+    }
+  }
+
+  handleError(event) {
+    const message = event?.message ?? 'unknown WebSocket error';
+    if (this.logFile) {
+      appendLine(this.logFile, `App-server WebSocket error: ${message}`);
+    }
+    this.emit('websocket/error', { message });
   }
 
   handleMessage(data) {
@@ -80,9 +119,6 @@ export class AppServerClient {
       return;
     }
 
-    const handlers = this.handlers.get(message.method) ?? [];
-    for (const handler of handlers) {
-      handler(message.params);
-    }
+    this.emit(message.method, message.params);
   }
 }
