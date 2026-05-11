@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fileTimestamp, slugifyName } from './fs-util.mjs';
 import { DEFAULT_INTERVAL_SECONDS, DEFAULT_MESSAGE, DEFAULT_URL, sessionDir, sessionLogDir } from './paths.mjs';
 import { isMatchingPidRunning, spawnDetached, terminateMatchingPid } from './processes.mjs';
@@ -118,7 +119,8 @@ export async function startSession(options) {
   };
   writeSessionState(name, state);
 
-  const pid = spawnDetached(process.execPath, [new URL('./session-runner.mjs', import.meta.url).pathname, '--name', name], {
+  const runnerPath = fileURLToPath(new URL('./session-runner.mjs', import.meta.url));
+  const pid = spawnDetached(process.execPath, [runnerPath, '--name', name], {
     cwd: sessionDir(name),
     logFile,
   });

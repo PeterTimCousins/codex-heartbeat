@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { slugifyName } from './fs-util.mjs';
 import { DEFAULT_INTERVAL_SECONDS, DEFAULT_URL, stateRoot } from './paths.mjs';
 import { ensurePreferences, preferencesPath, readPreferences, writePreferences } from './preferences.mjs';
@@ -215,7 +216,7 @@ function printJson(value) {
 }
 
 function repoRoot() {
-  return path.resolve(new URL('..', import.meta.url).pathname);
+  return path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 }
 
 function commandResult(command, args = []) {
