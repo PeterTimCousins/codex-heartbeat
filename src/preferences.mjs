@@ -10,6 +10,7 @@ export const DEFAULT_PREFERENCES = {
   heartbeatMessage: DEFAULT_MESSAGE,
   heartbeatThread: '',
   codexArgs: '--yolo',
+  launchApp: 'Terminal',
   keepHeartbeat: false,
 };
 

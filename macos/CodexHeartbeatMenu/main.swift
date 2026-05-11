@@ -85,6 +85,7 @@ struct MenuPreferences: Codable {
     var heartbeatMessage: String = "Heartbeat check: Are we done? If complete, report completion. If blocked, ask exactly what input is needed. If not blocked and no user input is needed, continue the next safe, coherent step."
     var heartbeatThread: String = ""
     var codexArgs: String = "--yolo"
+    var launchApp: String = "Terminal"
     var keepHeartbeat: Bool = false
 
     enum CodingKeys: String, CodingKey {
@@ -94,6 +95,7 @@ struct MenuPreferences: Codable {
         case heartbeatMessage
         case heartbeatThread
         case codexArgs
+        case launchApp
         case keepHeartbeat
     }
 
@@ -107,6 +109,7 @@ struct MenuPreferences: Codable {
         heartbeatMessage = try container.decodeIfPresent(String.self, forKey: .heartbeatMessage) ?? heartbeatMessage
         heartbeatThread = try container.decodeIfPresent(String.self, forKey: .heartbeatThread) ?? heartbeatThread
         codexArgs = try container.decodeIfPresent(String.self, forKey: .codexArgs) ?? codexArgs
+        launchApp = try container.decodeIfPresent(String.self, forKey: .launchApp) ?? launchApp
         keepHeartbeat = try container.decodeIfPresent(Bool.self, forKey: .keepHeartbeat) ?? keepHeartbeat
     }
 }
@@ -154,6 +157,17 @@ func formatInterval(_ seconds: Double) -> String {
         return "\(value / 60)m"
     }
     return "\(value)s"
+}
+
+func normalizedLaunchApp(_ value: String) -> String {
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if normalized == "iterm2" {
+        return "iterm"
+    }
+    if normalized == "ghostty" || normalized == "ghostty.app" || normalized == "cmux.app" {
+        return "cmux"
+    }
+    return normalized.isEmpty ? "terminal" : normalized
 }
 
 final class PreferencesStore {
@@ -537,6 +551,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
     private let errorLabel = NSTextField(labelWithString: "")
     private let tableView = NSTableView()
     private let defaultIntervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let launchAppPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let heartbeatMessageTextView = NSTextView()
     private let heartbeatThreadField = NSTextField()
     private let keepHeartbeatCheckbox = NSButton(checkboxWithTitle: "Keep heartbeat running after Codex closes", target: nil, action: nil)
@@ -547,6 +562,13 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
     private let settingsStatusLabel = NSTextField(labelWithString: "")
     private var advancedSettingViews: [NSView] = []
     private let intervalChoices = [300, 900, 1800, 3600]
+    private let launchAppChoices: [(title: String, value: String)] = [
+        ("Terminal", "Terminal"),
+        ("iTerm", "iTerm"),
+        ("cmux/Ghostty", "cmux"),
+        ("Other...", "__custom__"),
+    ]
+    private var customLaunchApp = ""
     private let settingsColumnX: CGFloat = 680
 
     init(runner: CommandRunner, preferencesStore: PreferencesStore, onStartCodex: @escaping () -> Void, onChanged: @escaping () -> Void) {
@@ -685,6 +707,14 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         defaultIntervalPopup.addItems(withTitles: ["5m", "15m", "30m", "1h"])
         content.addSubview(defaultIntervalPopup)
 
+        addSettingsLabel("Open Codex in", to: content, x: x + 178, y: 454)
+        launchAppPopup.frame = NSRect(x: x + 178, y: 426, width: 142, height: 26)
+        launchAppPopup.autoresizingMask = [.minXMargin, .minYMargin]
+        launchAppPopup.addItems(withTitles: launchAppChoices.map(\.title))
+        launchAppPopup.target = self
+        launchAppPopup.action = #selector(selectLaunchApp)
+        content.addSubview(launchAppPopup)
+
         addSettingsLabel("Heartbeat message", to: content, x: x, y: 386)
         heartbeatMessageTextView.font = NSFont.systemFont(ofSize: 13)
         heartbeatMessageTextView.isRichText = false
@@ -776,6 +806,14 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         } else {
             defaultIntervalPopup.selectItem(withTitle: "30m")
         }
+        let launchApp = normalizedLaunchApp(prefs.launchApp)
+        if let index = launchAppChoices.firstIndex(where: { normalizedLaunchApp($0.value) == launchApp }) {
+            launchAppPopup.selectItem(at: index)
+            customLaunchApp = ""
+        } else {
+            launchAppPopup.selectItem(withTitle: "Other...")
+            customLaunchApp = prefs.launchApp
+        }
         heartbeatMessageTextView.string = prefs.heartbeatMessage
         heartbeatThreadField.stringValue = prefs.heartbeatThread
         keepHeartbeatCheckbox.state = prefs.keepHeartbeat ? .on : .off
@@ -789,9 +827,35 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         setAdvancedSettingsVisible(advancedDisclosure.state == .on)
     }
 
+    @objc private func selectLaunchApp() {
+        let index = launchAppPopup.indexOfSelectedItem
+        guard index >= 0, index < launchAppChoices.count, launchAppChoices[index].value == "__custom__" else {
+            customLaunchApp = ""
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Other Terminal App"
+        alert.informativeText = "Enter the macOS application name to launch. It must accept command arguments like Ghostty or cmux."
+        alert.addButton(withTitle: "Use App")
+        alert.addButton(withTitle: "Cancel")
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.stringValue = customLaunchApp
+        alert.accessoryView = field
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            customLaunchApp = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if customLaunchApp.isEmpty {
+            launchAppPopup.selectItem(withTitle: "Terminal")
+        }
+    }
+
     @objc private func saveSettings() {
         let intervalIndex = defaultIntervalPopup.indexOfSelectedItem
         let interval = intervalIndex >= 0 && intervalIndex < intervalChoices.count ? intervalChoices[intervalIndex] : 1800
+        let launchIndex = launchAppPopup.indexOfSelectedItem
+        let selectedLaunchApp = launchIndex >= 0 && launchIndex < launchAppChoices.count ? launchAppChoices[launchIndex].value : "Terminal"
+        let launchApp = selectedLaunchApp == "__custom__" ? customLaunchApp.trimmingCharacters(in: .whitespacesAndNewlines) : selectedLaunchApp
         let heartbeatMessage = heartbeatMessageTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         let heartbeatThread = heartbeatThreadField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let serverName = serverNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -800,6 +864,11 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
 
         guard !heartbeatMessage.isEmpty else {
             settingsStatusLabel.stringValue = "Heartbeat message is required."
+            settingsStatusLabel.textColor = .systemRed
+            return
+        }
+        guard !launchApp.isEmpty else {
+            settingsStatusLabel.stringValue = "Launch app is required."
             settingsStatusLabel.textColor = .systemRed
             return
         }
@@ -817,6 +886,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         do {
             try preferencesStore.update {
                 $0.heartbeatIntervalSeconds = interval
+                $0.launchApp = launchApp
                 $0.heartbeatMessage = heartbeatMessage
                 $0.heartbeatThread = heartbeatThread
                 $0.keepHeartbeat = keepHeartbeatCheckbox.state == .on
@@ -1233,6 +1303,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return parts.joined(separator: " ")
     }
 
+    private func openLaunchApp(command: String, cwd: String) throws {
+        switch normalizedLaunchApp(preferencesStore.preferences.launchApp) {
+        case "terminal":
+            try openTerminal(command: command)
+        case "iterm":
+            try openITerm(command: command)
+        case "cmux":
+            try openGhosttyStyleTerminal(command: command, cwd: cwd, appNames: ["cmux", "Ghostty"])
+        default:
+            try openGhosttyStyleTerminal(command: command, cwd: cwd, appNames: [preferencesStore.preferences.launchApp])
+        }
+    }
+
     private func openTerminal(command: String) throws {
         let script = """
         tell application "Terminal"
@@ -1251,6 +1334,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let errorText = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             throw NSError(domain: "CodexHeartbeatMenu", code: Int(process.terminationStatus), userInfo: [
                 NSLocalizedDescriptionKey: errorText.isEmpty ? "Failed to open Terminal" : errorText
+            ])
+        }
+    }
+
+    private func openITerm(command: String) throws {
+        let script = """
+        tell application "iTerm"
+          activate
+          set newWindow to (create window with default profile)
+          tell current session of newWindow
+            write text "\(escapeAppleScript(command))"
+          end tell
+        end tell
+        """
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        let error = Pipe()
+        process.standardError = error
+        try process.run()
+        process.waitUntilExit()
+        if process.terminationStatus != 0 {
+            let errorText = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw NSError(domain: "CodexHeartbeatMenu", code: Int(process.terminationStatus), userInfo: [
+                NSLocalizedDescriptionKey: errorText.isEmpty ? "Failed to open iTerm" : errorText
+            ])
+        }
+    }
+
+    private func openGhosttyStyleTerminal(command: String, cwd: String, appNames: [String]) throws {
+        var lastError: Error?
+        for appName in appNames {
+            do {
+                try runOpenApp(
+                    appName,
+                    arguments: ["--working-directory=\(cwd)", "-e", "/bin/zsh", "-lc", command]
+                )
+                return
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? NSError(domain: "CodexHeartbeatMenu", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "Failed to open configured terminal app"
+        ])
+    }
+
+    private func runOpenApp(_ appName: String, arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-na", appName, "--args"] + arguments
+        let error = Pipe()
+        process.standardError = error
+        try process.run()
+        process.waitUntilExit()
+        if process.terminationStatus != 0 {
+            let errorText = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw NSError(domain: "CodexHeartbeatMenu", code: Int(process.terminationStatus), userInfo: [
+                NSLocalizedDescriptionKey: errorText.isEmpty ? "Failed to open \(appName)" : errorText
             ])
         }
     }
@@ -1316,7 +1458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cwd = url.path
         let command = "cd \(quoteShell(cwd)); \(wrapperCommand(cwd: cwd))"
         do {
-            try openTerminal(command: command)
+            try openLaunchApp(command: command, cwd: cwd)
         } catch {
             lastError = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
             renderMenu()

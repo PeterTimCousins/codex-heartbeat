@@ -49,7 +49,7 @@ node bin/codex-heartbeat.mjs codex --yolo
 
 This starts or reuses the managed app-server, starts a heartbeat session for the current directory, then runs `codex --remote <managed-url> --yolo`. The heartbeat stops when the wrapped Codex process exits.
 
-The same flow is available from the menu bar app as **Start Codex with Heartbeat...**. The app asks for a project folder, opens Terminal in that folder, and runs the wrapped Codex command using the saved preferences.
+The same flow is available from the menu bar app as **Start Codex with Heartbeat...**. The app asks for a project folder, opens the configured terminal app in that folder, and runs the wrapped Codex command using the saved preferences.
 
 Useful wrapper options:
 
@@ -133,8 +133,11 @@ node bin/codex-heartbeat.mjs preferences set \
   --heartbeat-message "Heartbeat check: Are we done? If complete, report completion. If blocked, ask exactly what input is needed. If not blocked and no user input is needed, continue the next safe, coherent step." \
   --heartbeat-thread "e2e extended testing" \
   --codex-args "--yolo" \
+  --launch-app "Terminal" \
   --keep-heartbeat false
 ```
+
+The menu app's **Open Codex in** setting supports Terminal, iTerm, cmux/Ghostty, and an **Other...** option for compatible terminal apps that accept command arguments through `open --args`.
 
 Stop a session:
 

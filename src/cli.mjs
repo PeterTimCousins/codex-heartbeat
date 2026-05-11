@@ -24,7 +24,7 @@ function usage() {
   codex-heartbeat session status --name NAME [--json]
   codex-heartbeat session list [--json]
   codex-heartbeat preferences [--json]
-  codex-heartbeat preferences set [--server-name NAME] [--server-url URL] [--heartbeat-interval SECONDS] [--heartbeat-message TEXT] [--heartbeat-thread THREAD_ID_OR_NAME] [--codex-args TEXT] [--keep-heartbeat true|false]
+  codex-heartbeat preferences set [--server-name NAME] [--server-url URL] [--heartbeat-interval SECONDS] [--heartbeat-message TEXT] [--heartbeat-thread THREAD_ID_OR_NAME] [--codex-args TEXT] [--launch-app APP] [--keep-heartbeat true|false]
   codex-heartbeat init [--build-menu] [--install-menu] [--json]
   codex-heartbeat doctor [--json]
   codex-heartbeat reap
@@ -608,6 +608,7 @@ function runPreferences(command, argv) {
       console.log(`  Heartbeat message: ${preferences.heartbeatMessage}`);
       console.log(`  Heartbeat thread: ${preferences.heartbeatThread || '(auto)'}`);
       console.log(`  Codex args: ${preferences.codexArgs}`);
+      console.log(`  Launch app: ${preferences.launchApp}`);
       console.log(`  Keep heartbeat: ${preferences.keepHeartbeat ? 'yes' : 'no'}`);
     }
     return;
@@ -638,6 +639,12 @@ function runPreferences(command, argv) {
     }
     if (options['codex-args'] !== undefined) {
       preferences.codexArgs = options['codex-args'];
+    }
+    if (options['launch-app'] !== undefined) {
+      if (!options['launch-app'].trim()) {
+        throw new Error('--launch-app cannot be empty');
+      }
+      preferences.launchApp = options['launch-app'].trim();
     }
     if (options['keep-heartbeat'] !== undefined) {
       preferences.keepHeartbeat = parseBoolean(options['keep-heartbeat']);

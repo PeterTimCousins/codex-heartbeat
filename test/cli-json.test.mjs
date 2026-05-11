@@ -119,6 +119,8 @@ test('preferences set and preferences --json round trip', () => {
         'e2e extended testing',
         '--codex-args',
         '--yolo --model test',
+        '--launch-app',
+        'cmux',
         '--keep-heartbeat',
         'true',
         '--json',
@@ -132,6 +134,7 @@ test('preferences set and preferences --json round trip', () => {
     assert.equal(status.preferences.heartbeatMessage, 'Custom heartbeat text');
     assert.equal(status.preferences.heartbeatThread, 'e2e extended testing');
     assert.equal(status.preferences.codexArgs, '--yolo --model test');
+    assert.equal(status.preferences.launchApp, 'cmux');
     assert.equal(status.preferences.keepHeartbeat, true);
   });
 });
