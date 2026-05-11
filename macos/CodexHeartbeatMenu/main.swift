@@ -544,6 +544,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
     private let settingsStatusLabel = NSTextField(labelWithString: "")
     private var advancedSettingViews: [NSView] = []
     private let intervalChoices = [300, 900, 1800, 3600]
+    private let settingsColumnX: CGFloat = 680
 
     init(runner: CommandRunner, preferencesStore: PreferencesStore, onStartCodex: @escaping () -> Void, onChanged: @escaping () -> Void) {
         self.runner = runner
@@ -601,6 +602,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
 
         let subtitle = NSTextField(labelWithString: "Launch Codex with heartbeat, monitor sessions, and adjust the settings most users need.")
         subtitle.frame = NSRect(x: 24, y: 572, width: 620, height: 18)
+        subtitle.autoresizingMask = [.width]
         subtitle.textColor = .secondaryLabelColor
         content.addSubview(subtitle)
 
@@ -609,6 +611,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         content.addSubview(serverLabel)
 
         urlLabel.frame = NSRect(x: 24, y: 514, width: 520, height: 18)
+        urlLabel.autoresizingMask = [.width]
         urlLabel.textColor = .secondaryLabelColor
         content.addSubview(urlLabel)
 
@@ -623,7 +626,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         content.addSubview(sessionsTitle)
 
         let scroll = NSScrollView(frame: NSRect(x: 24, y: 118, width: 620, height: 308))
-        scroll.autoresizingMask = [.height]
+        scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
         scroll.documentView = tableView
         content.addSubview(scroll)
@@ -646,6 +649,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         addButton(to: content, title: "Open Log", action: #selector(openLog), frame: NSRect(x: 364, y: 74, width: 86, height: 30))
 
         intervalPopup.frame = NSRect(x: 472, y: 76, width: 120, height: 26)
+        intervalPopup.autoresizingMask = [.maxXMargin]
         intervalPopup.addItems(withTitles: ["5m", "15m", "30m", "1h"])
         intervalPopup.target = self
         intervalPopup.action = #selector(setInterval)
@@ -654,25 +658,29 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         buildSettingsPanel(content)
 
         errorLabel.frame = NSRect(x: 24, y: 24, width: 990, height: 18)
+        errorLabel.autoresizingMask = [.width, .maxYMargin]
         errorLabel.textColor = .systemRed
         content.addSubview(errorLabel)
         loadSettings()
     }
 
     private func buildSettingsPanel(_ content: NSView) {
-        let x: CGFloat = 680
+        let x = settingsColumnX
         let title = NSTextField(labelWithString: "Settings")
         title.frame = NSRect(x: x, y: 536, width: 260, height: 22)
+        title.autoresizingMask = [.minXMargin]
         title.font = NSFont.boldSystemFont(ofSize: 15)
         content.addSubview(title)
 
         let note = NSTextField(wrappingLabelWithString: "These defaults are used when starting new Codex sessions from the menu. Running sessions can use their own interval.")
         note.frame = NSRect(x: x, y: 492, width: 320, height: 38)
+        note.autoresizingMask = [.minXMargin]
         note.textColor = .secondaryLabelColor
         content.addSubview(note)
 
         addSettingsLabel("Default interval", to: content, x: x, y: 454)
         defaultIntervalPopup.frame = NSRect(x: x, y: 426, width: 160, height: 26)
+        defaultIntervalPopup.autoresizingMask = [.minXMargin]
         defaultIntervalPopup.addItems(withTitles: ["5m", "15m", "30m", "1h"])
         content.addSubview(defaultIntervalPopup)
 
@@ -682,15 +690,18 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         heartbeatMessageTextView.allowsUndo = true
         heartbeatMessageTextView.textContainerInset = NSSize(width: 6, height: 6)
         let messageScroll = NSScrollView(frame: NSRect(x: x, y: 250, width: 320, height: 130))
+        messageScroll.autoresizingMask = [.minXMargin]
         messageScroll.borderType = .bezelBorder
         messageScroll.hasVerticalScroller = true
         messageScroll.documentView = heartbeatMessageTextView
         content.addSubview(messageScroll)
 
         keepHeartbeatCheckbox.frame = NSRect(x: x, y: 216, width: 320, height: 22)
+        keepHeartbeatCheckbox.autoresizingMask = [.minXMargin]
         content.addSubview(keepHeartbeatCheckbox)
 
         advancedDisclosure.frame = NSRect(x: x, y: 180, width: 220, height: 22)
+        advancedDisclosure.autoresizingMask = [.minXMargin]
         advancedDisclosure.target = self
         advancedDisclosure.action = #selector(toggleAdvancedSettings)
         content.addSubview(advancedDisclosure)
@@ -702,9 +713,11 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
 
         let save = NSButton(title: "Save Settings", target: self, action: #selector(saveSettings))
         save.frame = NSRect(x: 888, y: 178, width: 112, height: 30)
+        save.autoresizingMask = [.minXMargin]
         content.addSubview(save)
 
         settingsStatusLabel.frame = NSRect(x: x, y: 8, width: 320, height: 18)
+        settingsStatusLabel.autoresizingMask = [.minXMargin]
         settingsStatusLabel.textColor = .secondaryLabelColor
         content.addSubview(settingsStatusLabel)
 
@@ -727,6 +740,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
     private func addSettingsLabel(_ title: String, to content: NSView, x: CGFloat, y: CGFloat) {
         let label = NSTextField(labelWithString: title)
         label.frame = NSRect(x: x, y: y, width: 220, height: 18)
+        label.autoresizingMask = [.minXMargin]
         label.font = NSFont.boldSystemFont(ofSize: 12)
         content.addSubview(label)
     }
@@ -734,11 +748,13 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
     private func addAdvancedRow(_ title: String, field: NSTextField, to content: NSView, x: CGFloat, y: CGFloat) {
         let label = NSTextField(labelWithString: title)
         label.frame = NSRect(x: x, y: y + 22, width: 140, height: 16)
+        label.autoresizingMask = [.minXMargin]
         label.textColor = .secondaryLabelColor
         label.font = NSFont.systemFont(ofSize: 11)
         content.addSubview(label)
 
         field.frame = NSRect(x: x, y: y, width: 320, height: 22)
+        field.autoresizingMask = [.minXMargin]
         content.addSubview(field)
         advancedSettingViews.append(label)
         advancedSettingViews.append(field)
