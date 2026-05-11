@@ -75,6 +75,9 @@ struct SessionStatus: Decodable {
     let statusDetail: String?
     let logFile: String?
     let lastHeartbeatAt: String?
+    let queuedHeartbeat: Bool?
+    let createdAt: String?
+    let updatedAt: String?
     let message: String?
 }
 
@@ -168,6 +171,56 @@ func normalizedLaunchApp(_ value: String) -> String {
         return "cmux"
     }
     return normalized.isEmpty ? "terminal" : normalized
+}
+
+func parseTimestamp(_ value: String?) -> Date? {
+    guard let value, !value.isEmpty else { return nil }
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractional.date(from: value) {
+        return date
+    }
+    let standard = ISO8601DateFormatter()
+    standard.formatOptions = [.withInternetDateTime]
+    return standard.date(from: value)
+}
+
+func formatTimestamp(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale.current
+    formatter.timeZone = TimeZone.current
+    if Calendar.current.isDateInToday(date) {
+        formatter.dateStyle = .none
+        formatter.timeStyle = .medium
+    } else {
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+    }
+    return formatter.string(from: date)
+}
+
+func lastHeartbeatText(_ session: SessionStatus) -> String {
+    if let last = parseTimestamp(session.lastHeartbeatAt) {
+        return formatTimestamp(last)
+    }
+    return "not sent yet"
+}
+
+func nextHeartbeatText(_ session: SessionStatus) -> String {
+    guard session.running == true else {
+        return "not scheduled"
+    }
+    if session.queuedHeartbeat == true {
+        return "queued; sends when idle"
+    }
+    guard let base = parseTimestamp(session.lastHeartbeatAt) ?? parseTimestamp(session.createdAt) else {
+        return "pending"
+    }
+    let next = base.addingTimeInterval(session.intervalSeconds)
+    if next <= Date() {
+        return "due now"
+    }
+    return formatTimestamp(next)
 }
 
 final class PreferencesStore {
@@ -944,7 +997,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         case "target":
             value = session.threadPinned == true ? "pinned" : "latest cwd"
         case "last":
-            value = session.lastHeartbeatAt ?? ""
+            value = lastHeartbeatText(session)
         default:
             value = ""
         }
@@ -1184,11 +1237,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         addDisabled(submenu, "Server: \(session.serverName ?? "external")")
         addDisabled(submenu, "CWD: \(session.cwd)")
         addDisabled(submenu, "Interval: \(formatInterval(session.intervalSeconds))")
+        addDisabled(submenu, "Last heartbeat: \(lastHeartbeatText(session))")
+        addDisabled(submenu, "Next heartbeat: \(nextHeartbeatText(session))")
         addDisabled(submenu, "Target: \(session.threadPinned == true ? "pinned thread" : "latest cwd thread")")
         addDisabled(submenu, "Thread: \(session.threadId ?? "not selected")")
-        if let lastHeartbeatAt = session.lastHeartbeatAt {
-            addDisabled(submenu, "Last heartbeat: \(lastHeartbeatAt)")
-        }
         if let statusDetail = session.statusDetail {
             addDisabled(submenu, statusDetail)
         }
