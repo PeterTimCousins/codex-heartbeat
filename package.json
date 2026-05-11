@@ -1,0 +1,17 @@
+{
+  "name": "codex-heartbeat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A small manager for Codex app-server sessions and named heartbeat workers.",
+  "bin": {
+    "codex-heartbeat": "./bin/codex-heartbeat.mjs"
+  },
+  "scripts": {
+    "smoke": "node bin/codex-heartbeat.mjs --help && node bin/codex-heartbeat.mjs status",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
