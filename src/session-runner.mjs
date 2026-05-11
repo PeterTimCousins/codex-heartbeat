@@ -39,6 +39,17 @@ async function loadedThreadIds(client) {
   return ids;
 }
 
+async function listThreads(client) {
+  const threads = [];
+  let cursor = null;
+  do {
+    const result = await client.request('thread/list', { cursor, limit: 100 });
+    threads.push(...(result?.data ?? []));
+    cursor = result?.nextCursor ?? null;
+  } while (cursor);
+  return threads;
+}
+
 async function readThread(client, threadId) {
   const result = await client.request('thread/read', { threadId, includeTurns: false });
   return result?.thread ?? null;
@@ -61,8 +72,8 @@ export async function findLoadedThreadForCwd(client, cwd, logFile) {
   const threads = [];
   for (const id of ids) {
     try {
-      const thread = await readThread(client, id);
-      if (thread?.cwd === cwd && thread.status?.type !== 'notLoaded') {
+      const thread = await readLoadedThreadForCwd(client, id, cwd, logFile);
+      if (thread) {
         threads.push(thread);
       }
     } catch (error) {
@@ -71,6 +82,69 @@ export async function findLoadedThreadForCwd(client, cwd, logFile) {
   }
   threads.sort(compareThreadRecency);
   return threads[0] ?? null;
+}
+
+export async function readLoadedThreadForCwd(client, threadId, cwd, logFile) {
+  if (!threadId) {
+    return null;
+  }
+  const thread = await readThread(client, threadId);
+  if (thread?.cwd === cwd && thread.status?.type !== 'notLoaded') {
+    return thread;
+  }
+  return null;
+}
+
+export async function resolveFollowCwdThread(client, cwd, currentThreadId, logFile) {
+  const current = await readLoadedThreadForCwd(client, currentThreadId, cwd, logFile);
+  if (current) {
+    return current;
+  }
+  return findLoadedThreadForCwd(client, cwd, logFile);
+}
+
+export async function preserveEventSelectedThread(client, cwd, targetAtRefreshStart, currentTargetThreadId, candidateThread, logFile) {
+  if (currentTargetThreadId && currentTargetThreadId !== targetAtRefreshStart && candidateThread?.id !== currentTargetThreadId) {
+    const eventSelectedThread = await readLoadedThreadForCwd(client, currentTargetThreadId, cwd, logFile);
+    if (eventSelectedThread) {
+      return eventSelectedThread;
+    }
+  }
+  return candidateThread;
+}
+
+export async function findRecentThreadListCandidateForCwd(
+  client,
+  cwd,
+  { afterUpdatedAt = 0, currentThreadId = null, handledThreadIds = new Set() } = {},
+) {
+  const threads = await listThreads(client);
+  const candidates = threads.filter((thread) => (
+    thread?.id
+    && thread.id !== currentThreadId
+    && !handledThreadIds.has(thread.id)
+    && thread.cwd === cwd
+    && thread.status?.type === 'notLoaded'
+    && Number(thread.updatedAt ?? 0) > afterUpdatedAt
+  ));
+  candidates.sort(compareThreadRecency);
+  return candidates[0] ?? null;
+}
+
+export async function resumeThreadForCwd(client, threadId, cwd) {
+  if (!threadId) {
+    return null;
+  }
+  const result = await client.request('thread/resume', {
+    threadId,
+    cwd,
+    excludeTurns: true,
+  });
+  const thread = result?.thread ?? null;
+  if (thread?.cwd === cwd && thread.status?.type !== 'notLoaded') {
+    return thread;
+  }
+  return null;
 }
 
 export function shouldFollowCwdThread(state) {
@@ -97,6 +171,8 @@ async function main() {
   let queuedHeartbeat = false;
   let sentOnce = false;
   const followCwdThread = shouldFollowCwdThread(state);
+  let recentThreadListAfterUpdatedAt = Math.floor(Date.now() / 1000);
+  const handledRecentThreadListIds = new Set();
 
   function mark(updates) {
     updateSessionState(name, updates);
@@ -104,7 +180,9 @@ async function main() {
 
   async function refreshTarget() {
     if (followCwdThread) {
-      const thread = await findLoadedThreadForCwd(client, state.cwd, logFile);
+      const targetAtRefreshStart = targetThreadId;
+      let thread = await resolveFollowCwdThread(client, state.cwd, targetAtRefreshStart, logFile);
+      thread = await preserveEventSelectedThread(client, state.cwd, targetAtRefreshStart, targetThreadId, thread, logFile);
       if (!thread) {
         targetStatus = null;
         mark({
@@ -199,8 +277,81 @@ async function main() {
     return true;
   }
 
+  function setTargetThread(thread, reason, statusOverride = null) {
+    const nextStatus = statusOverride ?? thread.status?.type ?? null;
+    if (thread.id !== targetThreadId) {
+      const previousThreadId = targetThreadId;
+      targetThreadId = thread.id;
+      appendLine(
+        logFile,
+        previousThreadId
+          ? `retargeted from thread ${previousThreadId} to ${reason} thread ${targetThreadId} status=${nextStatus}`
+          : `selected ${reason} thread ${targetThreadId} status=${nextStatus}`,
+      );
+    }
+
+    targetStatus = nextStatus;
+    hasEverLoaded = true;
+    mark({
+      threadId: targetThreadId,
+      status: targetStatus,
+      statusDetail: null,
+    });
+  }
+
+  async function retargetToMatchingThread(threadId, reason, statusOverride = null) {
+    if (!followCwdThread || !threadId || threadId === targetThreadId) {
+      return false;
+    }
+    const thread = await readLoadedThreadForCwd(client, threadId, state.cwd, logFile);
+    if (!thread) {
+      return false;
+    }
+    setTargetThread(thread, reason, statusOverride);
+    if (targetStatus === 'idle' && queuedHeartbeat) {
+      queuedHeartbeat = false;
+      await sendHeartbeat(`queued-after-${reason}`);
+    }
+    return true;
+  }
+
+  async function retargetFromRecentThreadList() {
+    if (!followCwdThread) {
+      return false;
+    }
+
+    const candidate = await findRecentThreadListCandidateForCwd(client, state.cwd, {
+      afterUpdatedAt: recentThreadListAfterUpdatedAt,
+      currentThreadId: targetThreadId,
+      handledThreadIds: handledRecentThreadListIds,
+    });
+    if (!candidate) {
+      return false;
+    }
+
+    recentThreadListAfterUpdatedAt = Math.max(recentThreadListAfterUpdatedAt, Number(candidate.updatedAt ?? 0));
+    handledRecentThreadListIds.add(candidate.id);
+    appendLine(logFile, `found recent same-cwd thread ${candidate.id} in thread/list; resuming through app-server`);
+
+    const thread = await resumeThreadForCwd(client, candidate.id, state.cwd);
+    if (!thread) {
+      appendLine(logFile, `thread/list candidate ${candidate.id} did not resume into cwd ${state.cwd}`);
+      return false;
+    }
+
+    setTargetThread(thread, 'thread-list-resume');
+    if (targetStatus === 'idle' && queuedHeartbeat) {
+      queuedHeartbeat = false;
+      await sendHeartbeat('queued-after-thread-list-resume');
+    }
+    return true;
+  }
+
   client.on('thread/status/changed', (params) => {
     if (params?.threadId !== targetThreadId) {
+      retargetToMatchingThread(params?.threadId, 'status-event', params?.status?.type ?? null).catch((error) => {
+        appendLine(logFile, `status-event retarget failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
       return;
     }
     targetStatus = params?.status?.type ?? null;
@@ -212,6 +363,17 @@ async function main() {
         appendLine(logFile, `queued heartbeat failed: ${error instanceof Error ? error.message : String(error)}`);
       });
     }
+  });
+
+  client.on('thread/started', (params) => {
+    const thread = params?.thread;
+    if (!followCwdThread || !thread?.id || thread.id === targetThreadId) {
+      return;
+    }
+    if (thread.cwd !== state.cwd || thread.status?.type === 'notLoaded') {
+      return;
+    }
+    setTargetThread(thread, 'started-event');
   });
 
   client.on('thread/closed', (params) => {
@@ -293,6 +455,9 @@ async function main() {
       continue;
     }
 
+    await retargetFromRecentThreadList().catch((error) => {
+      appendLine(logFile, `thread-list retarget failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
     await refreshTarget();
     if (targetStatus === 'idle' && queuedHeartbeat) {
       queuedHeartbeat = false;

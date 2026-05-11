@@ -113,6 +113,8 @@ test('preferences set and preferences --json round trip', () => {
         'ws://127.0.0.1:19999',
         '--heartbeat-interval',
         '900',
+        '--heartbeat-message',
+        'Custom heartbeat text',
         '--codex-args',
         '--yolo --model test',
         '--keep-heartbeat',
@@ -125,6 +127,7 @@ test('preferences set and preferences --json round trip', () => {
     assert.equal(status.preferences.serverName, 'main');
     assert.equal(status.preferences.serverUrl, 'ws://127.0.0.1:19999');
     assert.equal(status.preferences.heartbeatIntervalSeconds, 900);
+    assert.equal(status.preferences.heartbeatMessage, 'Custom heartbeat text');
     assert.equal(status.preferences.codexArgs, '--yolo --model test');
     assert.equal(status.preferences.keepHeartbeat, true);
   });

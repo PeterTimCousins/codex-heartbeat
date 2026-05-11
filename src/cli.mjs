@@ -22,7 +22,7 @@ function usage() {
   codex-heartbeat session status --name NAME [--json]
   codex-heartbeat session list [--json]
   codex-heartbeat preferences [--json]
-  codex-heartbeat preferences set [--server-name NAME] [--server-url URL] [--heartbeat-interval SECONDS] [--codex-args TEXT] [--keep-heartbeat true|false]
+  codex-heartbeat preferences set [--server-name NAME] [--server-url URL] [--heartbeat-interval SECONDS] [--heartbeat-message TEXT] [--codex-args TEXT] [--keep-heartbeat true|false]
   codex-heartbeat init [--build-menu] [--install-menu] [--json]
   codex-heartbeat doctor [--json]
   codex-heartbeat reap
@@ -59,10 +59,10 @@ function parseOptions(argv) {
 
 function parseCodexWrapperOptions(argv) {
   const options = {
-    server: 'default',
+    server: null,
     url: null,
     heartbeat: true,
-    keepHeartbeat: false,
+    keepHeartbeat: null,
     heartbeatName: null,
     heartbeatInterval: null,
     heartbeatMessage: null,
@@ -317,8 +317,12 @@ async function runRemote(argv) {
 
 async function runCodex(argv) {
   const options = parseCodexWrapperOptions(argv);
-  const serverName = options.server ?? 'default';
-  const requestedUrl = options.url ?? DEFAULT_URL;
+  const preferences = readPreferences();
+  const serverName = options.server ?? preferences.serverName;
+  const requestedUrl = options.url ?? preferences.serverUrl;
+  const heartbeatInterval = options.heartbeatInterval ?? preferences.heartbeatIntervalSeconds;
+  const heartbeatMessage = options.heartbeatMessage ?? preferences.heartbeatMessage;
+  const keepHeartbeat = options.keepHeartbeat ?? preferences.keepHeartbeat;
   const heartbeatCwd = effectiveHeartbeatCwd(options);
   const existing = serverStatus(serverName);
   let url;
@@ -344,7 +348,7 @@ async function runCodex(argv) {
   const signalExitCodes = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
   const signalHandlers = new Map();
   function cleanupHeartbeat(reason) {
-    if (!options.heartbeat || !heartbeatStarted || options.keepHeartbeat || heartbeatCleaned) {
+    if (!options.heartbeat || !heartbeatStarted || keepHeartbeat || heartbeatCleaned) {
       return;
     }
     heartbeatCleaned = true;
@@ -374,8 +378,8 @@ async function runCodex(argv) {
     const result = await startSession({
       name: heartbeatName,
       cwd: heartbeatCwd,
-      intervalSeconds: options.heartbeatInterval,
-      message: options.heartbeatMessage,
+      intervalSeconds: heartbeatInterval,
+      message: heartbeatMessage,
       url,
       serverName,
     });
@@ -450,12 +454,13 @@ async function runServer(command, argv) {
 async function runSession(command, argv) {
   const options = parseOptions(argv);
   if (command === 'start') {
+    const preferences = readPreferences();
     const result = await startSession({
       name: options.name,
       cwd: options.cwd,
       threadId: options.thread,
-      intervalSeconds: options.interval,
-      message: options.message,
+      intervalSeconds: options.interval ?? preferences.heartbeatIntervalSeconds,
+      message: options.message ?? preferences.heartbeatMessage,
       once: options.once,
       immediate: options.immediate,
       url: options.url,
@@ -544,6 +549,7 @@ function runPreferences(command, argv) {
       console.log(`  Server: ${preferences.serverName}`);
       console.log(`  URL: ${preferences.serverUrl}`);
       console.log(`  Interval: ${preferences.heartbeatIntervalSeconds}s`);
+      console.log(`  Heartbeat message: ${preferences.heartbeatMessage}`);
       console.log(`  Codex args: ${preferences.codexArgs}`);
       console.log(`  Keep heartbeat: ${preferences.keepHeartbeat ? 'yes' : 'no'}`);
     }
@@ -563,6 +569,12 @@ function runPreferences(command, argv) {
         throw new Error('--heartbeat-interval must be a positive number of seconds');
       }
       preferences.heartbeatIntervalSeconds = interval;
+    }
+    if (options['heartbeat-message'] !== undefined) {
+      if (!options['heartbeat-message']) {
+        throw new Error('--heartbeat-message cannot be empty');
+      }
+      preferences.heartbeatMessage = options['heartbeat-message'];
     }
     if (options['codex-args'] !== undefined) {
       preferences.codexArgs = options['codex-args'];

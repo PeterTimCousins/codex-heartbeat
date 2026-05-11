@@ -82,6 +82,7 @@ struct MenuPreferences: Codable {
     var serverName: String = "default"
     var serverUrl: String = "ws://127.0.0.1:18654"
     var heartbeatIntervalSeconds: Int = 1800
+    var heartbeatMessage: String = "Heartbeat check: Are we done? If complete, report completion. If blocked, ask exactly what input is needed. If not blocked and no user input is needed, continue the next safe, coherent step."
     var codexArgs: String = "--yolo"
     var keepHeartbeat: Bool = false
 
@@ -89,6 +90,7 @@ struct MenuPreferences: Codable {
         case serverName
         case serverUrl
         case heartbeatIntervalSeconds
+        case heartbeatMessage
         case codexArgs
         case keepHeartbeat
     }
@@ -100,6 +102,7 @@ struct MenuPreferences: Codable {
         serverName = try container.decodeIfPresent(String.self, forKey: .serverName) ?? serverName
         serverUrl = try container.decodeIfPresent(String.self, forKey: .serverUrl) ?? serverUrl
         heartbeatIntervalSeconds = try container.decodeIfPresent(Int.self, forKey: .heartbeatIntervalSeconds) ?? heartbeatIntervalSeconds
+        heartbeatMessage = try container.decodeIfPresent(String.self, forKey: .heartbeatMessage) ?? heartbeatMessage
         codexArgs = try container.decodeIfPresent(String.self, forKey: .codexArgs) ?? codexArgs
         keepHeartbeat = try container.decodeIfPresent(Bool.self, forKey: .keepHeartbeat) ?? keepHeartbeat
     }
@@ -358,6 +361,7 @@ final class SettingsWindowController: NSWindowController {
     private let serverNameField = NSTextField()
     private let serverUrlField = NSTextField()
     private let intervalField = NSTextField()
+    private let heartbeatMessageTextView = NSTextView()
     private let codexArgsField = NSTextField()
     private let keepHeartbeatCheckbox = NSButton(checkboxWithTitle: "Keep heartbeat running after Codex exits", target: nil, action: nil)
 
@@ -366,7 +370,7 @@ final class SettingsWindowController: NSWindowController {
         self.onSave = onSave
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 270),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 420),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -386,24 +390,27 @@ final class SettingsWindowController: NSWindowController {
 
     private func buildContent() {
         guard let window else { return }
-        let content = NSView(frame: window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 540, height: 270))
+        window.setContentSize(NSSize(width: 620, height: 420))
+        let content = NSView(frame: window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 620, height: 420))
         window.contentView = content
 
-        addRow(to: content, label: "Server name", field: serverNameField, y: 205)
-        addRow(to: content, label: "Server URL", field: serverUrlField, y: 165)
-        addRow(to: content, label: "Interval seconds", field: intervalField, y: 125)
-        addRow(to: content, label: "Codex args", field: codexArgsField, y: 85)
+        addRow(to: content, label: "Server name", field: serverNameField, y: 360)
+        addRow(to: content, label: "Server URL", field: serverUrlField, y: 320)
+        addRow(to: content, label: "Interval seconds", field: intervalField, y: 280)
+        addTextArea(to: content, label: "Heartbeat text", textView: heartbeatMessageTextView, y: 145, height: 105)
+        addRow(to: content, label: "Codex args", field: codexArgsField, y: 105)
 
-        keepHeartbeatCheckbox.frame = NSRect(x: 150, y: 48, width: 340, height: 22)
+        keepHeartbeatCheckbox.frame = NSRect(x: 150, y: 68, width: 430, height: 22)
         content.addSubview(keepHeartbeatCheckbox)
 
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
-        cancel.frame = NSRect(x: 330, y: 16, width: 86, height: 30)
+        cancel.frame = NSRect(x: 414, y: 24, width: 86, height: 30)
         content.addSubview(cancel)
 
         let save = NSButton(title: "Save", target: self, action: #selector(save))
-        save.keyEquivalent = "\r"
-        save.frame = NSRect(x: 426, y: 16, width: 86, height: 30)
+        save.keyEquivalent = "s"
+        save.keyEquivalentModifierMask = .command
+        save.frame = NSRect(x: 510, y: 24, width: 86, height: 30)
         content.addSubview(save)
     }
 
@@ -413,8 +420,28 @@ final class SettingsWindowController: NSWindowController {
         labelView.frame = NSRect(x: 24, y: y + 4, width: 110, height: 18)
         content.addSubview(labelView)
 
-        field.frame = NSRect(x: 150, y: y, width: 340, height: 24)
+        field.frame = NSRect(x: 150, y: y, width: 430, height: 24)
         content.addSubview(field)
+    }
+
+    private func addTextArea(to content: NSView, label: String, textView: NSTextView, y: CGFloat, height: CGFloat) {
+        let labelView = NSTextField(labelWithString: label)
+        labelView.alignment = .right
+        labelView.frame = NSRect(x: 24, y: y + height - 22, width: 110, height: 18)
+        content.addSubview(labelView)
+
+        textView.font = NSFont.systemFont(ofSize: 13)
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.textContainerInset = NSSize(width: 5, height: 5)
+        textView.autoresizingMask = [.width]
+
+        let scroll = NSScrollView(frame: NSRect(x: 150, y: y, width: 430, height: height))
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        scroll.autoresizingMask = [.width]
+        scroll.documentView = textView
+        content.addSubview(scroll)
     }
 
     private func loadValues() {
@@ -422,6 +449,7 @@ final class SettingsWindowController: NSWindowController {
         serverNameField.stringValue = prefs.serverName
         serverUrlField.stringValue = prefs.serverUrl
         intervalField.stringValue = String(prefs.heartbeatIntervalSeconds)
+        heartbeatMessageTextView.string = prefs.heartbeatMessage
         codexArgsField.stringValue = prefs.codexArgs
         keepHeartbeatCheckbox.state = prefs.keepHeartbeat ? .on : .off
     }
@@ -433,6 +461,7 @@ final class SettingsWindowController: NSWindowController {
     @objc private func save() {
         let serverName = serverNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let serverUrl = serverUrlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let heartbeatMessage = heartbeatMessageTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         let codexArgs = codexArgsField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let interval = Int(intervalField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)), interval > 0 else {
             showError("Interval must be a positive number of seconds.")
@@ -450,12 +479,17 @@ final class SettingsWindowController: NSWindowController {
             showError("Server URL is required.")
             return
         }
+        guard !heartbeatMessage.isEmpty else {
+            showError("Heartbeat text is required.")
+            return
+        }
 
         do {
             try preferencesStore.update {
                 $0.serverName = serverName
                 $0.serverUrl = serverUrl
                 $0.heartbeatIntervalSeconds = interval
+                $0.heartbeatMessage = heartbeatMessage
                 $0.codexArgs = codexArgs
                 $0.keepHeartbeat = keepHeartbeatCheckbox.state == .on
             }
@@ -958,6 +992,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "--server", quoteShell(prefs.serverName),
             "--url", quoteShell(prefs.serverUrl),
             "--heartbeat-interval", String(prefs.heartbeatIntervalSeconds),
+            "--heartbeat-message", quoteShell(prefs.heartbeatMessage),
             "--heartbeat-cwd", quoteShell(cwd),
         ]
         if prefs.keepHeartbeat {

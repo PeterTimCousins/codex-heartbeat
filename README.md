@@ -122,6 +122,7 @@ node bin/codex-heartbeat.mjs preferences set \
   --server-name default \
   --server-url ws://127.0.0.1:18654 \
   --heartbeat-interval 1800 \
+  --heartbeat-message "Heartbeat check: Are we done? If complete, report completion. If blocked, ask exactly what input is needed. If not blocked and no user input is needed, continue the next safe, coherent step." \
   --codex-args "--yolo" \
   --keep-heartbeat false
 ```
@@ -150,7 +151,7 @@ The heartbeat worker treats `loaded + idle` as the only safe send condition:
 
 - If the thread is `idle`, it sends with `turn/start`.
 - If the thread is `active`, it queues one heartbeat and sends after the thread becomes idle.
-- Sessions started without `--thread` follow the newest loaded thread for the configured cwd. This lets a wrapped Codex session continue heartbeating after `/new` creates a new thread.
+- Sessions started without `--thread` follow the active loaded thread for the configured cwd. They retarget on app-server `thread/started` and `thread/status/changed` events, and they use app-server `thread/list` plus `thread/resume` as a conservative fallback when `/resume` updates recency without emitting a loaded-thread event.
 - Sessions started with `--thread` are pinned to that exact thread.
 - Only one running unpinned session can follow a given cwd on a given app-server URL. Start a second session with `--thread` if you deliberately need exact thread pinning.
 - If no matching thread is loaded, an unpinned session waits for one to appear.

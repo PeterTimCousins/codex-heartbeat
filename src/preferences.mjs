@@ -1,12 +1,13 @@
 import { readJson, writeJson } from './fs-util.mjs';
 import fs from 'node:fs';
-import { stateRoot } from './paths.mjs';
+import { DEFAULT_MESSAGE, stateRoot } from './paths.mjs';
 import path from 'node:path';
 
 export const DEFAULT_PREFERENCES = {
   serverName: 'default',
   serverUrl: 'ws://127.0.0.1:18654',
   heartbeatIntervalSeconds: 1800,
+  heartbeatMessage: DEFAULT_MESSAGE,
   codexArgs: '--yolo',
   keepHeartbeat: false,
 };

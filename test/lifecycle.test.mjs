@@ -5,7 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { findUnpinnedCwdConflict, reapManagedState, removeSession, sessionStatus, startSession } from '../src/session-manager.mjs';
-import { compareThreadRecency, findLoadedThreadForCwd, shouldFollowCwdThread } from '../src/session-runner.mjs';
+import {
+  compareThreadRecency,
+  findLoadedThreadForCwd,
+  findRecentThreadListCandidateForCwd,
+  preserveEventSelectedThread,
+  readLoadedThreadForCwd,
+  resumeThreadForCwd,
+  resolveFollowCwdThread,
+  shouldFollowCwdThread,
+} from '../src/session-runner.mjs';
 import { serverStatus, stopServer } from '../src/server-manager.mjs';
 import { writeServerState, writeSessionState } from '../src/state.mjs';
 
@@ -209,6 +218,73 @@ test('findLoadedThreadForCwd selects the newest loaded matching cwd thread', asy
   assert.equal(selected.id, 'newer');
 });
 
+test('resolveFollowCwdThread preserves the current matching thread over newer loaded threads', async () => {
+  const cwd = '/tmp/project-a';
+  const threads = new Map([
+    ['current', { id: 'current', cwd, updatedAt: 100, status: { type: 'idle' } }],
+    ['newer', { id: 'newer', cwd, updatedAt: 200, status: { type: 'idle' } }],
+  ]);
+  const client = {
+    async request(method, params) {
+      if (method === 'thread/loaded/list') {
+        return { data: [...threads.keys()], nextCursor: null };
+      }
+      if (method === 'thread/read') {
+        return { thread: threads.get(params.threadId) };
+      }
+      throw new Error(`unexpected method ${method}`);
+    },
+  };
+
+  const selected = await resolveFollowCwdThread(client, cwd, 'current', null);
+  assert.equal(selected.id, 'current');
+});
+
+test('readLoadedThreadForCwd can select an older resumed thread by event id', async () => {
+  const cwd = '/tmp/project-a';
+  const threads = new Map([
+    ['fresh', { id: 'fresh', cwd, updatedAt: 300, status: { type: 'idle' } }],
+    ['resumed', { id: 'resumed', cwd, updatedAt: 100, status: { type: 'idle' } }],
+  ]);
+  const client = {
+    async request(method, params) {
+      if (method === 'thread/read') {
+        return { thread: threads.get(params.threadId) };
+      }
+      throw new Error(`unexpected method ${method}`);
+    },
+  };
+
+  const selected = await readLoadedThreadForCwd(client, 'resumed', cwd, null);
+  assert.equal(selected.id, 'resumed');
+});
+
+test('preserveEventSelectedThread keeps an event target selected during an in-flight poll', async () => {
+  const cwd = '/tmp/project-a';
+  const threads = new Map([
+    ['polled-winner', { id: 'polled-winner', cwd, updatedAt: 300, status: { type: 'idle' } }],
+    ['event-target', { id: 'event-target', cwd, updatedAt: 200, status: { type: 'idle' } }],
+  ]);
+  const client = {
+    async request(method, params) {
+      if (method === 'thread/read') {
+        return { thread: threads.get(params.threadId) };
+      }
+      throw new Error(`unexpected method ${method}`);
+    },
+  };
+
+  const selected = await preserveEventSelectedThread(
+    client,
+    cwd,
+    null,
+    'event-target',
+    threads.get('polled-winner'),
+    null,
+  );
+  assert.equal(selected.id, 'event-target');
+});
+
 test('compareThreadRecency falls back to createdAt and thread id when updatedAt ties', () => {
   const threads = [
     { id: '019e17b3-b5b0-7693-b9f5-99510e36a316', updatedAt: 100, createdAt: 100 },
@@ -218,6 +294,63 @@ test('compareThreadRecency falls back to createdAt and thread id when updatedAt 
 
   threads.sort(compareThreadRecency);
   assert.equal(threads[0].id, '019e17bf-dcc7-74d1-8dd3-e7a54aa009d9');
+});
+
+test('findRecentThreadListCandidateForCwd selects a newer same-cwd not-loaded thread', async () => {
+  const cwd = '/tmp/project-a';
+  const client = {
+    async request(method, params) {
+      if (method === 'thread/list') {
+        assert.equal(params.limit, 100);
+        return {
+          data: [
+            { id: 'old', cwd, updatedAt: 100, createdAt: 100, status: { type: 'notLoaded' } },
+            { id: 'current', cwd, updatedAt: 400, createdAt: 400, status: { type: 'notLoaded' } },
+            { id: 'handled', cwd, updatedAt: 500, createdAt: 500, status: { type: 'notLoaded' } },
+            { id: 'loaded', cwd, updatedAt: 600, createdAt: 600, status: { type: 'idle' } },
+            { id: 'other-cwd', cwd: '/tmp/project-b', updatedAt: 700, createdAt: 700, status: { type: 'notLoaded' } },
+            { id: 'resumed', cwd, updatedAt: 800, createdAt: 800, status: { type: 'notLoaded' } },
+          ],
+          nextCursor: null,
+        };
+      }
+      throw new Error(`unexpected method ${method}`);
+    },
+  };
+
+  const selected = await findRecentThreadListCandidateForCwd(client, cwd, {
+    afterUpdatedAt: 300,
+    currentThreadId: 'current',
+    handledThreadIds: new Set(['handled']),
+  });
+  assert.equal(selected.id, 'resumed');
+});
+
+test('resumeThreadForCwd resumes without turns through the app-server', async () => {
+  const cwd = '/tmp/project-a';
+  const calls = [];
+  const client = {
+    async request(method, params) {
+      calls.push({ method, params });
+      if (method === 'thread/resume') {
+        return { thread: { id: params.threadId, cwd, status: { type: 'idle' } } };
+      }
+      throw new Error(`unexpected method ${method}`);
+    },
+  };
+
+  const thread = await resumeThreadForCwd(client, 'resumed-thread', cwd);
+  assert.equal(thread.id, 'resumed-thread');
+  assert.deepEqual(calls, [
+    {
+      method: 'thread/resume',
+      params: {
+        threadId: 'resumed-thread',
+        cwd,
+        excludeTurns: true,
+      },
+    },
+  ]);
 });
 
 test('running unpinned sessions conflict on the same cwd and app-server url', () => {
