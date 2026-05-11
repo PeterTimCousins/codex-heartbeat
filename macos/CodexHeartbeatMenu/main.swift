@@ -633,6 +633,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
 
         let scroll = NSScrollView(frame: NSRect(x: 24, y: 118, width: 620, height: 308))
         scroll.autoresizingMask = [.width, .height]
+        scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.documentView = tableView
         content.addSubview(scroll)
@@ -647,6 +648,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = false
         tableView.headerView = NSTableHeaderView()
+        tableView.cornerView = NSView()
 
         addButton(to: content, title: "Start", action: #selector(startSession), frame: NSRect(x: 24, y: 74, width: 72, height: 30))
         addButton(to: content, title: "Stop", action: #selector(stopSession), frame: NSRect(x: 104, y: 74, width: 72, height: 30))
