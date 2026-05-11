@@ -59,6 +59,7 @@ export async function startSession(options) {
   const intervalSeconds = Number(options.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS);
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const threadPinned = Boolean(options.threadId);
+  const initialThreadId = options.threadId ?? options.initialThreadId ?? null;
   if (!Number.isFinite(intervalSeconds) || intervalSeconds < 1) {
     throw new Error('--interval must be a positive number of seconds');
   }
@@ -104,7 +105,7 @@ export async function startSession(options) {
     url,
     serverName,
     cwd,
-    threadId: options.threadId ?? null,
+    threadId: initialThreadId,
     threadPinned,
     intervalSeconds,
     message: options.message ?? DEFAULT_MESSAGE,

@@ -124,8 +124,12 @@ func sessionStartArgs(_ session: SessionStatus, intervalSeconds: Int? = nil) -> 
     if !session.url.isEmpty {
         args += ["--url", session.url]
     }
-    if session.threadPinned == true, let threadId = session.threadId, !threadId.isEmpty {
-        args += ["--thread", threadId]
+    if let threadId = session.threadId, !threadId.isEmpty {
+        if session.threadPinned == true {
+            args += ["--thread", threadId]
+        } else {
+            args += ["--initial-thread", threadId]
+        }
     }
     if let message = session.message, !message.isEmpty {
         args += ["--message", message]

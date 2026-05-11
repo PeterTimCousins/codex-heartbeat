@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { extractResumeThreadId, parseResumeLogRows } from '../src/codex-log-watch.mjs';
-import { findUnpinnedCwdConflict, reapManagedState, removeSession, sessionStatus, startSession } from '../src/session-manager.mjs';
+import { findUnpinnedCwdConflict, reapManagedState, removeSession, sessionStatus, startSession, stopSession } from '../src/session-manager.mjs';
 import {
   compareThreadRecency,
   findLoadedThreadForCwd,
@@ -184,6 +184,25 @@ test('startSession does not auto-start an unnamed-port non-default server', asyn
       () => startSession({ name: 'needs-server', serverName: 'secondary', cwd: process.cwd() }),
       /Server secondary is not running/,
     );
+  } finally {
+    cleanupHome(home);
+  }
+});
+
+test('startSession can preserve an unpinned initial thread across restarts', async () => {
+  const home = makeHome();
+  try {
+    const result = await startSession({
+      name: 'preserve-current',
+      url: 'ws://127.0.0.1:19015',
+      cwd: process.cwd(),
+      initialThreadId: 'current-resumed-thread',
+      intervalSeconds: 300,
+    });
+
+    assert.equal(result.state.threadId, 'current-resumed-thread');
+    assert.equal(result.state.threadPinned, false);
+    stopSession('preserve-current', 'test-cleanup');
   } finally {
     cleanupHome(home);
   }

@@ -18,7 +18,7 @@ function usage() {
   codex-heartbeat server status [--name default] [--json]
   codex-heartbeat remote [--server default] [-- <codex args...>]
   codex-heartbeat codex [--server default] [--url ws://127.0.0.1:18654] [--heartbeat-name NAME] [--heartbeat-thread THREAD_ID_OR_NAME] [--heartbeat-thread-name NAME] [--heartbeat-interval SECONDS] [--heartbeat-message TEXT] [--heartbeat-cwd PATH] [--no-heartbeat] [--keep-heartbeat] [codex args...]
-  codex-heartbeat session start --name NAME [--server default] [--url URL] [--cwd PATH] [--thread THREAD_ID] [--thread-name NAME] [--interval SECONDS] [--message TEXT] [--immediate] [--once]
+  codex-heartbeat session start --name NAME [--server default] [--url URL] [--cwd PATH] [--thread THREAD_ID] [--thread-name NAME] [--initial-thread THREAD_ID] [--interval SECONDS] [--message TEXT] [--immediate] [--once]
   codex-heartbeat session stop --name NAME
   codex-heartbeat session remove --name NAME [--force]
   codex-heartbeat session status --name NAME [--json]
@@ -514,6 +514,7 @@ async function runSession(command, argv) {
       name: options.name,
       cwd: options.cwd,
       threadId,
+      initialThreadId: options['initial-thread'] ?? null,
       intervalSeconds: options.interval ?? preferences.heartbeatIntervalSeconds,
       message: options.message ?? preferences.heartbeatMessage,
       once: options.once,
