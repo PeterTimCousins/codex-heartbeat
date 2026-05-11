@@ -47,9 +47,9 @@ Start Codex with a managed app-server and heartbeat in one command, from this ch
 node bin/codex-heartbeat.mjs codex --yolo
 ```
 
-This starts or reuses the managed app-server, starts a heartbeat session for the current directory, then runs `codex --remote <managed-url> --yolo`. The heartbeat stops when the wrapped Codex process exits.
+This starts or reuses the managed app-server, starts a uniquely named heartbeat session for this launch, then runs `codex --remote <managed-url> --yolo`. The heartbeat claims the first new matching thread for the selected cwd and stops when the wrapped Codex process exits.
 
-If the auto-named heartbeat session for that directory is already running, the wrapper refuses to launch Codex. This avoids opening a second same-cwd Codex session that could cause the existing unpinned heartbeat to follow the wrong thread. Stop or restart the existing heartbeat first, or pass a distinct `--heartbeat-name` and pin it with `--heartbeat-thread` when you deliberately need a separate session.
+If you pass `--heartbeat-name`, the wrapper uses that exact session name instead of generating a unique one. A running session with the same explicit name still blocks the launch, because that would mean the wrapper does not own the heartbeat it is about to manage.
 
 The same flow is available from the menu bar app as **Start Codex with Heartbeat...**. The app asks for a project folder, opens the configured terminal app in that folder, and runs the wrapped Codex command using the saved preferences.
 
@@ -59,7 +59,7 @@ Useful wrapper options:
 node bin/codex-heartbeat.mjs codex \
   --server main \
   --heartbeat-interval 1800 \
-  --heartbeat-name my-repo \
+  --heartbeat-name my-named-session \
   --keep-heartbeat \
   --yolo
 ```

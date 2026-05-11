@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { AppServerClient } from './app-server-client.mjs';
 import { extractResumeThreadId, readCodexLogHighWatermark, readCodexResumeLogRows } from './codex-log-watch.mjs';
 import { appendLine } from './fs-util.mjs';
-import { clearTriggerMarker, hasStopMarker, hasTriggerMarker, readSessionState, updateSessionState } from './state.mjs';
+import { clearTriggerMarker, hasStopMarker, hasTriggerMarker, listSessionNames, readSessionState, updateSessionState } from './state.mjs';
 
 function parseArgs(argv) {
   const args = { name: null };
@@ -75,6 +75,24 @@ export async function findLoadedThreadForCwd(client, cwd, logFile) {
     try {
       const thread = await readLoadedThreadForCwd(client, id, cwd, logFile);
       if (thread) {
+        threads.push(thread);
+      }
+    } catch (error) {
+      appendLine(logFile, `failed to read loaded thread ${id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  threads.sort(compareThreadRecency);
+  return threads[0] ?? null;
+}
+
+export async function findLoadedThreadForCwdSince(client, cwd, afterCreatedAt, logFile) {
+  const ids = await loadedThreadIds(client);
+  const threads = [];
+  for (const id of ids) {
+    try {
+      const thread = await readLoadedThreadForCwd(client, id, cwd, logFile);
+      const createdAt = Number(thread?.createdAt ?? thread?.updatedAt ?? 0);
+      if (thread && createdAt >= Number(afterCreatedAt ?? 0)) {
         threads.push(thread);
       }
     } catch (error) {
@@ -159,6 +177,32 @@ export function shouldUseRecentThreadListFallback({ followCwdThread, codexResume
   return Boolean(followCwdThread && !codexResumeLogEnabled);
 }
 
+export function isThreadReservedByOtherClaimSession(currentName, currentState, thread) {
+  if (!thread?.id) {
+    return false;
+  }
+  const createdAt = Number(thread.createdAt ?? thread.updatedAt ?? 0);
+  for (const sessionName of listSessionNames()) {
+    if (sessionName === currentName) {
+      continue;
+    }
+    const session = readSessionState(sessionName);
+    if (!session?.claimNewThread || session.threadId) {
+      continue;
+    }
+    if (['stopped', 'closed', 'stale', 'failed'].includes(session.status)) {
+      continue;
+    }
+    if (session.url !== currentState.url || session.cwd !== currentState.cwd) {
+      continue;
+    }
+    if (createdAt >= Number(session.claimThreadAfter ?? 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function main() {
   const { name } = parseArgs(process.argv.slice(2));
   const state = readSessionState(name);
@@ -175,7 +219,9 @@ async function main() {
   let hasEverLoaded = false;
   let queuedHeartbeat = false;
   let sentOnce = false;
-  const followCwdThread = shouldFollowCwdThread(state);
+  let claimNewThread = Boolean(state.claimNewThread && !state.threadId);
+  const claimThreadAfter = Number(state.claimThreadAfter ?? 0);
+  const followCwdThread = !claimNewThread && shouldFollowCwdThread(state);
   let recentThreadListAfterUpdatedAt = Math.floor(Date.now() / 1000);
   const handledRecentThreadListIds = new Set();
   let codexResumeLogLastSeenId = 0;
@@ -190,6 +236,20 @@ async function main() {
   }
 
   async function refreshTarget() {
+    if (claimNewThread && !targetThreadId) {
+      const thread = await findLoadedThreadForCwdSince(client, state.cwd, claimThreadAfter, logFile);
+      if (!thread) {
+        targetStatus = null;
+        mark({
+          status: 'waiting_for_thread',
+          statusDetail: `Waiting for a new loaded thread for cwd ${state.cwd}`,
+        });
+        return null;
+      }
+      claimThread(thread, 'claim-new-thread');
+      return thread;
+    }
+
     if (followCwdThread) {
       const targetAtRefreshStart = targetThreadId;
       let thread = await resolveFollowCwdThread(client, state.cwd, targetAtRefreshStart, logFile);
@@ -332,12 +392,26 @@ async function main() {
     });
   }
 
+  function claimThread(thread, reason, statusOverride = null) {
+    setTargetThread(thread, reason, statusOverride);
+    claimNewThread = false;
+    mark({
+      claimNewThread: false,
+      threadPinned: true,
+      statusDetail: null,
+    });
+  }
+
   async function retargetToMatchingThread(threadId, reason, statusOverride = null) {
     if (!followCwdThread || !threadId || threadId === targetThreadId) {
       return false;
     }
     const thread = await readLoadedThreadForCwd(client, threadId, state.cwd, logFile);
     if (!thread) {
+      return false;
+    }
+    if (isThreadReservedByOtherClaimSession(name, state, thread)) {
+      appendLine(logFile, `skip ${reason} retarget to thread ${thread.id}: reserved by another claim-new-thread session`);
       return false;
     }
     setTargetThread(thread, reason, statusOverride);
@@ -434,10 +508,25 @@ async function main() {
 
   client.on('thread/started', (params) => {
     const thread = params?.thread;
+    if (claimNewThread) {
+      if (!thread?.id || thread.cwd !== state.cwd || thread.status?.type === 'notLoaded') {
+        return;
+      }
+      const createdAt = Number(thread.createdAt ?? thread.updatedAt ?? 0);
+      if (createdAt < claimThreadAfter) {
+        return;
+      }
+      claimThread(thread, 'started-event');
+      return;
+    }
     if (!followCwdThread || !thread?.id || thread.id === targetThreadId) {
       return;
     }
     if (thread.cwd !== state.cwd || thread.status?.type === 'notLoaded') {
+      return;
+    }
+    if (isThreadReservedByOtherClaimSession(name, state, thread)) {
+      appendLine(logFile, `skip started-event thread ${thread.id}: reserved by another claim-new-thread session`);
       return;
     }
     setTargetThread(thread, 'started-event');

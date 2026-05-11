@@ -28,7 +28,7 @@ function usage() {
   codex-heartbeat server status [--name default] [--json]
   codex-heartbeat remote [--server default] [-- <codex args...>]
   codex-heartbeat codex [--server default] [--url ws://127.0.0.1:18654] [--heartbeat-name NAME] [--heartbeat-thread THREAD_ID_OR_NAME] [--heartbeat-thread-name NAME] [--heartbeat-interval SECONDS] [--heartbeat-message TEXT] [--heartbeat-cwd PATH] [--no-heartbeat] [--keep-heartbeat] [codex args...]
-  codex-heartbeat session start --name NAME [--server default] [--url URL] [--cwd PATH] [--thread THREAD_ID] [--thread-name NAME] [--initial-thread THREAD_ID] [--interval SECONDS] [--message TEXT] [--immediate] [--once]
+  codex-heartbeat session start --name NAME [--server default] [--url URL] [--cwd PATH] [--thread THREAD_ID] [--thread-name NAME] [--initial-thread THREAD_ID] [--claim-new-thread] [--interval SECONDS] [--message TEXT] [--immediate] [--once]
   codex-heartbeat session trigger --name NAME
   codex-heartbeat session stop --name NAME
   codex-heartbeat session remove --name NAME [--force]
@@ -57,7 +57,7 @@ function parseOptions(argv) {
       continue;
     }
     const key = arg.slice(2);
-    if (['foreground', 'immediate', 'once', 'json', 'build-menu', 'install-menu', 'force'].includes(key)) {
+    if (['foreground', 'immediate', 'once', 'json', 'build-menu', 'install-menu', 'force', 'claim-new-thread'].includes(key)) {
       options[key] = true;
       continue;
     }
@@ -161,11 +161,15 @@ function parseCodexWrapperOptions(argv) {
   return options;
 }
 
-function autoHeartbeatName(cwd) {
+function autoHeartbeatName(cwd, { unique = false } = {}) {
   const resolved = path.resolve(cwd);
   const base = path.basename(resolved).replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'session';
   const hash = crypto.createHash('sha256').update(resolved).digest('hex').slice(0, 8);
-  return `${base}-${hash}`;
+  if (!unique) {
+    return `${base}-${hash}`;
+  }
+  const launchHash = crypto.randomBytes(3).toString('hex');
+  return `${base}-${hash}-${Date.now().toString(36)}-${launchHash}`;
 }
 
 function hasCodexCwdArg(args) {
@@ -314,12 +318,15 @@ function fullStatus() {
 }
 
 function printSession(session) {
+  const target = session.claimNewThread
+    ? 'next new thread for cwd'
+    : session.threadPinned ? 'pinned thread' : 'latest loaded thread for cwd';
   console.log(`Session: ${session.name}`);
   console.log(`  Status: ${session.status}${session.running ? ' (process running)' : ''}`);
   console.log(`  Server: ${session.serverName ?? 'external'}`);
   console.log(`  URL: ${session.url}`);
   console.log(`  CWD: ${session.cwd}`);
-  console.log(`  Target: ${session.threadPinned ? 'pinned thread' : 'latest loaded thread for cwd'}`);
+  console.log(`  Target: ${target}`);
   console.log(`  Thread: ${session.threadId ?? 'not selected'}`);
   console.log(`  Interval: ${session.intervalSeconds}s`);
   console.log(`  PID: ${session.pid ?? 'none'}`);
@@ -370,7 +377,7 @@ async function runCodex(argv) {
     console.log(`Ready: ${started.ready?.ok ? 'yes' : `not confirmed (${started.ready?.readyUrl})`}`);
   }
 
-  const heartbeatName = options.heartbeatName ?? autoHeartbeatName(heartbeatCwd);
+  const heartbeatName = options.heartbeatName ?? autoHeartbeatName(heartbeatCwd, { unique: true });
   let heartbeatStarted = false;
   let heartbeatCleaned = false;
   let child;
@@ -406,10 +413,12 @@ async function runCodex(argv) {
 
   if (options.heartbeat) {
     const heartbeatThreadId = await resolveHeartbeatThreadId(url, { ...options, heartbeatThread });
+    const claimNewThread = !options.heartbeatName && !heartbeatThreadId;
     const result = await startSession({
       name: heartbeatName,
       cwd: heartbeatCwd,
       threadId: heartbeatThreadId,
+      claimNewThread,
       intervalSeconds: heartbeatInterval,
       message: heartbeatMessage,
       url,
@@ -424,7 +433,7 @@ async function runCodex(argv) {
     if (!result.started) {
       removeSignalHandlers();
       throw new Error(
-        `${result.message}. Refusing to launch Codex because this wrapper did not create the heartbeat session. Stop or restart that heartbeat first, or use --heartbeat-name for a separate session.`,
+        `${result.message}. Refusing to launch Codex because this wrapper did not create the heartbeat session. Stop or restart that heartbeat first, or use a different --heartbeat-name for a separate session.`,
       );
     }
   }
@@ -539,6 +548,7 @@ async function runSession(command, argv) {
       cwd: options.cwd,
       threadId,
       initialThreadId: options['initial-thread'] ?? null,
+      claimNewThread: Boolean(options['claim-new-thread']),
       intervalSeconds: options.interval ?? preferences.heartbeatIntervalSeconds,
       message: options.message ?? preferences.heartbeatMessage,
       once: options.once,

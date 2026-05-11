@@ -39,6 +39,9 @@ function sessionServerName(session) {
 }
 
 function sessionFollowsCwd(session) {
+  if (session.claimNewThread) {
+    return false;
+  }
   if (Object.hasOwn(session, 'threadPinned')) {
     return !session.threadPinned;
   }
@@ -88,6 +91,7 @@ export async function startSession(options) {
   const intervalSeconds = Number(options.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS);
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const threadPinned = Boolean(options.threadId);
+  const claimNewThread = Boolean(options.claimNewThread && !threadPinned);
   const initialThreadId = options.threadId ?? options.initialThreadId ?? null;
   if (!Number.isFinite(intervalSeconds) || intervalSeconds < 1) {
     throw new Error('--interval must be a positive number of seconds');
@@ -118,7 +122,7 @@ export async function startSession(options) {
     serverName = null;
   }
 
-  if (!threadPinned) {
+  if (!threadPinned && !claimNewThread) {
     const conflict = findUnpinnedCwdConflict({ name, cwd, url });
     if (conflict) {
       throw new Error(
@@ -138,6 +142,8 @@ export async function startSession(options) {
     cwd,
     threadId: initialThreadId,
     threadPinned,
+    claimNewThread,
+    claimThreadAfter: claimNewThread ? Math.floor(Date.now() / 1000) : null,
     intervalSeconds,
     message: options.message ?? DEFAULT_MESSAGE,
     once: Boolean(options.once),

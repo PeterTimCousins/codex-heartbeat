@@ -18,7 +18,9 @@ import {
 import {
   compareThreadRecency,
   findLoadedThreadForCwd,
+  findLoadedThreadForCwdSince,
   findRecentThreadListCandidateForCwd,
+  isThreadReservedByOtherClaimSession,
   preserveEventSelectedThread,
   readLoadedThreadForCwd,
   resumeThreadForCwd,
@@ -343,6 +345,30 @@ test('findLoadedThreadForCwd selects the newest loaded matching cwd thread', asy
   assert.equal(selected.id, 'newer');
 });
 
+test('findLoadedThreadForCwdSince ignores older loaded cwd threads', async () => {
+  const cwd = '/tmp/project-a';
+  const threads = new Map([
+    ['old', { id: 'old', cwd, createdAt: 100, updatedAt: 300, status: { type: 'idle' } }],
+    ['new', { id: 'new', cwd, createdAt: 400, updatedAt: 400, status: { type: 'idle' } }],
+    ['other', { id: 'other', cwd: '/tmp/project-b', createdAt: 500, updatedAt: 500, status: { type: 'idle' } }],
+  ]);
+  const client = {
+    async request(method, params) {
+      if (method === 'thread/loaded/list') {
+        assert.equal(params.limit, 100);
+        return { data: [...threads.keys()], nextCursor: null };
+      }
+      if (method === 'thread/read') {
+        return { thread: threads.get(params.threadId) };
+      }
+      throw new Error(`unexpected method ${method}`);
+    },
+  };
+
+  const selected = await findLoadedThreadForCwdSince(client, cwd, 350, null);
+  assert.equal(selected.id, 'new');
+});
+
 test('resolveFollowCwdThread preserves the current matching thread over newer loaded threads', async () => {
   const cwd = '/tmp/project-a';
   const threads = new Map([
@@ -573,6 +599,68 @@ test('pinned sessions do not conflict with cwd-following sessions', () => {
       url: 'ws://127.0.0.1:19010',
     });
     assert.equal(conflict, null);
+  } finally {
+    cleanupHome(home);
+  }
+});
+
+test('claim-new-thread sessions do not conflict with cwd-following sessions', () => {
+  const home = makeHome();
+  const cwd = path.resolve('/tmp/project-a');
+  try {
+    writeSessionState('first', {
+      name: 'first',
+      url: 'ws://127.0.0.1:19010',
+      serverName: 'default',
+      cwd,
+      intervalSeconds: 60,
+      pid: process.pid,
+      status: 'waiting_for_thread',
+      commandFragment: '',
+      claimNewThread: true,
+    });
+
+    const conflict = findUnpinnedCwdConflict({
+      name: 'second',
+      cwd,
+      url: 'ws://127.0.0.1:19010',
+    });
+    assert.equal(conflict, null);
+  } finally {
+    cleanupHome(home);
+  }
+});
+
+test('claim-new-thread sessions reserve newly started cwd threads from existing followers', () => {
+  const home = makeHome();
+  const cwd = path.resolve('/tmp/project-a');
+  try {
+    writeSessionState('claiming-wrapper', {
+      name: 'claiming-wrapper',
+      url: 'ws://127.0.0.1:19010',
+      serverName: 'default',
+      cwd,
+      intervalSeconds: 60,
+      pid: process.pid,
+      status: 'waiting_for_thread',
+      commandFragment: '',
+      claimNewThread: true,
+      claimThreadAfter: 300,
+    });
+
+    const reserved = isThreadReservedByOtherClaimSession(
+      'existing-follower',
+      { url: 'ws://127.0.0.1:19010', cwd },
+      { id: 'new-thread', cwd, createdAt: 400, status: { type: 'idle' } },
+    );
+    assert.equal(reserved, true);
+
+    const oldThread = isThreadReservedByOtherClaimSession(
+      'existing-follower',
+      { url: 'ws://127.0.0.1:19010', cwd },
+      { id: 'old-thread', cwd, createdAt: 200, status: { type: 'idle' } },
+    );
+    assert.equal(oldThread, false);
   } finally {
     cleanupHome(home);
   }

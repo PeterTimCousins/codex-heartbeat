@@ -277,6 +277,56 @@ test('codex wrapper refuses to launch when its heartbeat session is already runn
   });
 });
 
+test('codex wrapper auto-names new heartbeat sessions for repeated launches in one cwd', () => {
+  withHome((home) => {
+    const keeper = spawnKeeper();
+    try {
+      writeJson(path.join(home, 'servers', 'default', 'server.json'), {
+        name: 'default',
+        url: 'ws://127.0.0.1:19015',
+        pid: keeper.pid,
+        managed: true,
+        commandFragment: '',
+      });
+      writeJson(path.join(home, 'sessions', 'existing-follower', 'session.json'), {
+        name: 'existing-follower',
+        url: 'ws://127.0.0.1:19015',
+        serverName: 'default',
+        cwd: repoRoot,
+        intervalSeconds: 60,
+        pid: keeper.pid,
+        status: 'idle',
+        commandFragment: '',
+        threadPinned: false,
+      });
+
+      const binDir = path.join(home, 'bin');
+      fs.mkdirSync(binDir, { recursive: true });
+      const fakeCodex = path.join(binDir, 'codex');
+      const launchMarker = path.join(home, 'codex-launched');
+      fs.writeFileSync(fakeCodex, `#!/bin/sh\ntouch "${launchMarker}"\nexit 0\n`);
+      fs.chmodSync(fakeCodex, 0o755);
+
+      runText(
+        ['codex', '--url', 'ws://127.0.0.1:19015', '--yolo'],
+        home,
+        { PATH: `${binDir}:${process.env.PATH}` },
+      );
+
+      assert.equal(fs.existsSync(launchMarker), true);
+      assert.equal(isPidRunning(keeper.pid), true);
+      const sessions = runJson(['session', 'list', '--json'], home).sessions;
+      const generated = sessions.find((session) => session.name !== 'existing-follower');
+      assert.ok(generated);
+      assert.match(generated.name, /^codex-heartbeat-[a-f0-9]{8}-/);
+      assert.equal(generated.claimNewThread, true);
+      assert.equal(generated.threadPinned, false);
+    } finally {
+      keeper.kill('SIGKILL');
+    }
+  });
+});
+
 test('codex wrapper uses Codex cwd argument for heartbeat target', () => {
   withHome((home) => {
     const keeper = spawnKeeper();

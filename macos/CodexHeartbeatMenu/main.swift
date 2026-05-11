@@ -69,6 +69,7 @@ struct SessionStatus: Decodable {
     let cwd: String
     let threadId: String?
     let threadPinned: Bool?
+    let claimNewThread: Bool?
     let intervalSeconds: Double
     let pid: Int?
     let running: Bool?
@@ -138,6 +139,9 @@ func sessionStartArgs(_ session: SessionStatus, intervalSeconds: Int? = nil) -> 
         } else {
             args += ["--initial-thread", threadId]
         }
+    }
+    if session.claimNewThread == true {
+        args.append("--claim-new-thread")
     }
     if let message = session.message, !message.isEmpty {
         args += ["--message", message]
@@ -232,6 +236,13 @@ func nextHeartbeatText(_ session: SessionStatus) -> String {
         return "due now"
     }
     return formatTimestamp(next)
+}
+
+func targetText(_ session: SessionStatus) -> String {
+    if session.claimNewThread == true {
+        return "next new thread"
+    }
+    return session.threadPinned == true ? "pinned" : "latest cwd"
 }
 
 final class PreferencesStore {
@@ -1007,7 +1018,7 @@ final class DashboardWindowController: NSWindowController, NSTableViewDataSource
         case "interval":
             value = formatInterval(session.intervalSeconds)
         case "target":
-            value = session.threadPinned == true ? "pinned" : "latest cwd"
+            value = targetText(session)
         case "last":
             value = lastHeartbeatText(session)
         default:
@@ -1256,7 +1267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         addDisabled(submenu, "Interval: \(formatInterval(session.intervalSeconds))")
         addDisabled(submenu, "Last heartbeat: \(lastHeartbeatText(session))")
         addDisabled(submenu, "Next heartbeat: \(nextHeartbeatText(session))")
-        addDisabled(submenu, "Target: \(session.threadPinned == true ? "pinned thread" : "latest cwd thread")")
+        addDisabled(submenu, "Target: \(targetText(session))")
         addDisabled(submenu, "Thread: \(session.threadId ?? "not selected")")
         if let statusDetail = session.statusDetail {
             addDisabled(submenu, statusDetail)
