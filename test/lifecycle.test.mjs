@@ -15,6 +15,7 @@ import {
   resumeThreadForCwd,
   resolveFollowCwdThread,
   shouldFollowCwdThread,
+  shouldUseRecentThreadListFallback,
 } from '../src/session-runner.mjs';
 import { serverStatus, stopServer } from '../src/server-manager.mjs';
 import { writeServerState, writeSessionState } from '../src/state.mjs';
@@ -365,6 +366,12 @@ test('parseResumeLogRows extracts Codex app-server resume thread ids', () => {
   assert.equal(rows.length, 2);
   assert.equal(extractResumeThreadId(rows[0]), '019de3ee-14f6-7250-a52c-4dbed01b36ef');
   assert.equal(extractResumeThreadId(rows[1]), '019e1629-418d-7ed2-bf57-1115a5892fda');
+});
+
+test('recent thread-list fallback is disabled when Codex resume log detection is available', () => {
+  assert.equal(shouldUseRecentThreadListFallback({ followCwdThread: true, codexResumeLogEnabled: false }), true);
+  assert.equal(shouldUseRecentThreadListFallback({ followCwdThread: true, codexResumeLogEnabled: true }), false);
+  assert.equal(shouldUseRecentThreadListFallback({ followCwdThread: false, codexResumeLogEnabled: false }), false);
 });
 
 test('resolveThreadReferenceFromThreads resolves ids and exact names', () => {

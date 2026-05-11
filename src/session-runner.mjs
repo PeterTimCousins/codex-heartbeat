@@ -155,6 +155,10 @@ export function shouldFollowCwdThread(state) {
   return !state.threadId;
 }
 
+export function shouldUseRecentThreadListFallback({ followCwdThread, codexResumeLogEnabled }) {
+  return Boolean(followCwdThread && !codexResumeLogEnabled);
+}
+
 async function main() {
   const { name } = parseArgs(process.argv.slice(2));
   const state = readSessionState(name);
@@ -319,7 +323,7 @@ async function main() {
   }
 
   async function retargetFromRecentThreadList() {
-    if (!followCwdThread) {
+    if (!shouldUseRecentThreadListFallback({ followCwdThread, codexResumeLogEnabled })) {
       return false;
     }
 
